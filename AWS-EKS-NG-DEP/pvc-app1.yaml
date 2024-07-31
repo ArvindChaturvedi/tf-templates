@@ -8,7 +8,7 @@ spec:
   accessModes:
     - ReadWriteOnce
   hostPath:
-    path: /mnt/data-app1
+    path: /mnt/data/history/archiver/Log
 ---
 apiVersion: v1
 kind: PersistentVolumeClaim
