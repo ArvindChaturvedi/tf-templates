@@ -1,19 +1,19 @@
 apiVersion: v1
 kind: PersistentVolume
 metadata:
-  name: pv-app1
+  name: pv-app2
 spec:
   capacity:
     storage: 1Gi
   accessModes:
     - ReadWriteOnce
   hostPath:
-    path: /mnt/data-app1
+    path: /mnt/data/applogs-presistentvolumeclaim
 ---
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
-  name: pvc-app1
+  name: pvc-app2
 spec:
   accessModes:
     - ReadWriteOnce
