@@ -1,12 +1,13 @@
-# fluent-bit/templates/daemonset.yaml
+# fluent-bit/templates/deployment.yaml
 apiVersion: apps/v1
-kind: DaemonSet
+kind: Deployment
 metadata:
   name: {{ include "fluent-bit.fullname" . }}
   namespace: {{ .Values.namespace }}
   labels:
     app: {{ include "fluent-bit.fullname" . }}
 spec:
+  replicas: {{ .Values.fluentbit.replicas | default 1 }}  # Number of Fluent Bit replicas
   selector:
     matchLabels:
       app: {{ include "fluent-bit.fullname" . }}
