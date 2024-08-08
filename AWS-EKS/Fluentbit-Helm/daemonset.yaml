@@ -29,6 +29,10 @@ spec:
               mountPath: /var/log
             - name: varlib
               mountPath: /var/lib/flb_kube
+            {{- range .Values.fluentbit.persistentVolumes }}
+            - name: {{ .name }}
+              mountPath: {{ .mountPath }}
+            {{- end }}
       volumes:
         - name: config
           configMap:
@@ -39,7 +43,11 @@ spec:
         - name: varlib
           hostPath:
             path: /var/lib/flb_kube
-      serviceAccountName: fluent-bit
+        {{- range .Values.fluentbit.persistentVolumes }}
+        - name: {{ .name }}
+          persistentVolumeClaim:
+            claimName: {{ .claimName }}
+        {{- end }}
       {{- if .Values.fluentbit.existingIamRole.arn }}
       automountServiceAccountToken: true
       {{- end }}
