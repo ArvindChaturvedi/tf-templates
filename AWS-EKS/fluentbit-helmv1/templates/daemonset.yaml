@@ -22,6 +22,10 @@ spec:
           mountPath: /var/log
         - name: config
           mountPath: /fluent-bit/etc/
+        {{- range .Values.fluentbit.volumes }}
+        - name: {{ .name }}
+          mountPath: {{ .mountPath }}
+        {{- end }}
       volumes:
       - name: varlog
         hostPath:
@@ -29,3 +33,8 @@ spec:
       - name: config
         configMap:
           name: {{ .Values.daemonset.name }}-config
+      {{- range .Values.fluentbit.volumes }}
+      - name: {{ .name }}
+        persistentVolumeClaim:
+          claimName: {{ .pvc }}
+      {{- end }}
