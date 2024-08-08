@@ -5,6 +5,31 @@ metadata:
   name: {{ include "fluent-bit.fullname" . }}-config
   namespace: {{ .Values.namespace }}
 data:
-  fluent-bit.conf: {{ .Values.fluentbit.config.inputs | quote }}
-  filters.conf: {{ .Values.fluentbit.config.filters | quote }}
-  outputs.conf: {{ .Values.fluentbit.config.outputs | quote }}
+  fluent-bit.conf: |-
+    {{- if .Values.fluentbit.config.inputs }}
+    {{ .Values.fluentbit.config.inputs | trim | indent 4 }}
+    {{- end }}
+    {{- range .Values.fluentbit.additionalInputs }}
+    {{ . | indent 4 }}
+    {{- end }}
+
+  filters.conf: |-
+    {{- if .Values.fluentbit.config.filters }}
+    {{ .Values.fluentbit.config.filters | trim | indent 4 }}
+    {{- end }}
+    {{- range .Values.fluentbit.additionalFilters }}
+    {{ . | indent 4 }}
+    {{- end }}
+
+  outputs.conf: |-
+    {{- if .Values.fluentbit.config.outputs }}
+    {{ .Values.fluentbit.config.outputs | trim | indent 4 }}
+    {{- end }}
+    {{- range .Values.fluentbit.additionalOutputs }}
+    {{ . | indent 4 }}
+    {{- end }}
+
+  parsers.conf: |-
+    {{- range .Values.fluentbit.additionalParsers }}
+    {{ . | indent 4 }}
+    {{- end }}
