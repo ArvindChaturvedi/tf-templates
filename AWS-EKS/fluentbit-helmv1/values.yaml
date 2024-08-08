@@ -1,35 +1,53 @@
-apiVersion: v1
-kind: ConfigMap
-metadata:
-  name: {{ .Values.daemonset.name }}-config
-  namespace: {{ .Values.namespace }}
-data:
-  fluent-bit.conf: |
-    [SERVICE]
-        Flush        1
-        Daemon       Off
-        Log_Level    info
-        Parsers_File parsers.conf
+namespace: amazon-cloudwatch
 
-    {{- range .Values.fluentbit.volumes }}
-    [INPUT]
-        Name              tail
-        Path              {{ .path }}
-        Path_Key          {{ .name }}_log_path
-        Tag               {{ .name }}.*
-        DB                /var/log/flb_{{ .name }}.db
-        Mem_Buf_Limit     5MB
-        Skip_Long_Lines   On
-        Refresh_Interval  10
-    {{- end }}
+serviceAccount:
+  create: true
+  name: fluent-bit
 
-{{ .Values.fluentbit.config.filters | indent 4 }}
+clusterRole:
+  create: true
+  name: fluent-bit
 
-{{ .Values.fluentbit.config.outputs | indent 4 }}
-  parsers.conf: |
-    [PARSER]
-        Name        docker
-        Format      json
-        Time_Key    time
-        Time_Format %Y-%m-%dT%H:%M:%S.%L
-        Time_Keep   On
+daemonset:
+  name: fluent-bit
+
+fluentbit:
+  image:
+    repository: fluent/fluent-bit
+    tag: 1.8.3
+    pullPolicy: IfNotPresent
+
+  volumes:
+    - name: data-history
+      mountPath: /var/data/history
+      pvc: history-pvc
+      path: /var/data/history/*.logs
+
+    - name: data-authlog
+      mountPath: /var/data/authlog
+      pvc: authlog-pvc
+      path: /var/data/authlog/*.log
+
+    - name: data-apphistory
+      mountPath: /var/data/apphistory
+      pvc: apphistory-pvc
+      path: /var/data/apphistory/*.log
+
+  config:
+    filters: |
+      [FILTER]
+          Name              kubernetes
+          Match             *
+          Merge_Log         On
+          Merge_Log_Key     log_processed
+          K8S-Logging.Parser On
+          K8S-Logging.Exclude Off
+
+    outputs: |
+      [OUTPUT]
+          Name              cloudwatch
+          Match             *
+          region            us-west-2
+          log_group_name    fluent-bit-log-group
+          log_stream_prefix from-fluent-bit-
+          auto_create_group true
