@@ -1,0 +1,55 @@
+# fluent-bit/templates/daemonset.yaml
+
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: {{ include "fluent-bit.fullname" . }}
+  namespace: {{ .Values.namespace }}
+  labels:
+    app: {{ include "fluent-bit.fullname" . }}
+spec:
+  selector:
+    matchLabels:
+      app: {{ include "fluent-bit.fullname" . }}
+  template:
+    metadata:
+      labels:
+        app: {{ include "fluent-bit.fullname" . }}
+    spec:
+      serviceAccountName: fluent-bit
+      containers:
+        - name: fluent-bit
+          image: fluent/fluent-bit:1.8.0
+          env:
+            - name: AWS_REGION
+              value: "us-east-1"
+          volumeMounts:
+            - name: config
+              mountPath: /fluent-bit/etc/
+            - name: varlog
+              mountPath: /var/log
+            - name: varlib
+              mountPath: /var/lib/flb_kube
+      volumes:
+        - name: config
+          configMap:
+            name: {{ include "fluent-bit.fullname" . }}-config
+        - name: varlog
+          hostPath:
+            path: /var/log
+        - name: varlib
+          hostPath:
+            path: /var/lib/flb_kube
+      serviceAccountName: fluent-bit
+      {{- if .Values.fluentbit.existingIamRole.arn }}
+      automountServiceAccountToken: true
+      {{- end }}
+      {{- if .Values.daemonset.tolerations }}
+      tolerations: {{ toJson .Values.daemonset.tolerations }}
+      {{- end }}
+      {{- if .Values.daemonset.nodeSelector }}
+      nodeSelector: {{ toJson .Values.daemonset.nodeSelector }}
+      {{- end }}
+      {{- if .Values.daemonset.affinity }}
+      affinity: {{ toJson .Values.daemonset.affinity }}
+      {{- end }}
