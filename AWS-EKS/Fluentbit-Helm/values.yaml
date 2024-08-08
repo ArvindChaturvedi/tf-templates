@@ -40,10 +40,40 @@ fluentbit:
           auto_create_group true
           log_stream_name   {instance_id}
 
+  # Additional plugins
+  additionalInputs:
+    - |
+      [INPUT]
+          Name              cpu
+          Tag               cpu.*
+    - |
+      [INPUT]
+          Name              mem
+          Tag               mem.*
+
+  additionalFilters:
+    - |
+      [FILTER]
+          Name              grep
+          Match             *
+          Regex             log "error"
+
+  additionalOutputs:
+    - |
+      [OUTPUT]
+          Name              stdout
+          Match             *
+          Format            json
+
+  additionalParsers:
+    - |
+      [PARSER]
+          Name              json
+          Format            json
+
   existingIamRole:
     arn: arn:aws:iam::<AWS_ACCOUNT_ID>:role/<IAM_ROLE_NAME>
 
-  # Define additional persistent volumes
   persistentVolumes:
     - name: history-logs
       claimName: history-logs-pvc
@@ -54,7 +84,7 @@ fluentbit:
     - name: additional-logs
       claimName: additional-logs-pvc
       mountPath: /data/additional
-      # Add more persistent volumes as needed
+
   daemonset:
     enabled: true
     updateStrategy:
