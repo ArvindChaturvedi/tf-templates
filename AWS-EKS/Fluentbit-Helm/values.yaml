@@ -8,7 +8,7 @@ fluentbit:
     enabled: true
     type: ClusterIP
     annotations: {}
-  
+
   config:
     inputs: |
       [INPUT]
@@ -43,10 +43,22 @@ fluentbit:
   existingIamRole:
     arn: arn:aws:iam::<AWS_ACCOUNT_ID>:role/<IAM_ROLE_NAME>
 
-daemonset:
-  enabled: true
-  updateStrategy:
-    type: RollingUpdate
-  nodeSelector: {}
-  tolerations: []
-  affinity: {}
+  # Define additional persistent volumes
+  persistentVolumes:
+    - name: history-logs
+      claimName: history-logs-pvc
+      mountPath: /data/history
+    - name: authlog
+      claimName: authlog-pvc
+      mountPath: /data/authlog
+    - name: additional-logs
+      claimName: additional-logs-pvc
+      mountPath: /data/additional
+      # Add more persistent volumes as needed
+  daemonset:
+    enabled: true
+    updateStrategy:
+      type: RollingUpdate
+    nodeSelector: {}
+    tolerations: []
+    affinity: {}
