@@ -1,0 +1,68 @@
+namespace: amazon-cloudwatch
+
+serviceAccount:
+  create: true
+  name: fluent-bit
+
+clusterRole:
+  create: true
+  name: fluent-bit
+
+daemonset:
+  name: fluent-bit
+
+fluentbit:
+  image:
+    repository: fluent/fluent-bit
+    tag: 1.8.3
+    pullPolicy: IfNotPresent
+
+  config:
+    inputs: |
+      [INPUT]
+          Name              tail
+          Path              /data/history/*.logs
+          Path_Key          history_log_path
+          Tag               history.*
+          DB                /var/log/flb_history.db
+          Mem_Buf_Limit     5MB
+          Skip_Long_Lines   On
+          Refresh_Interval  10
+          
+      [INPUT]
+          Name              tail
+          Path              /data/authlog/*.log
+          Path_Key          authlog_path
+          Tag               authlog.*
+          DB                /var/log/flb_authlog.db
+          Mem_Buf_Limit     5MB
+          Skip_Long_Lines   On
+          Refresh_Interval  10
+
+      [INPUT]
+          Name              tail
+          Path              /data/apphistory/*.log
+          Path_Key          apphistory_log_path
+          Tag               apphistory.*
+          DB                /var/log/flb_apphistory.db
+          Mem_Buf_Limit     5MB
+          Skip_Long_Lines   On
+          Refresh_Interval  10
+
+    filters: |
+      [FILTER]
+          Name              kubernetes
+          Match             *
+          Merge_Log         On
+          Merge_Log_Key     log_processed
+          K8S-Logging.Parser On
+          K8S-Logging.Exclude Off
+
+    outputs: |
+      [OUTPUT]
+          Name              cloudwatch
+          Match             *
+          region            us-west-2
+          log_group_name    fluent-bit-log-group
+          log_stream_prefix from-fluent-bit-
+          auto_create_group true
