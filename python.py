@@ -1,67 +1,71 @@
 import requests
-import datetime
+from datetime import datetime, timedelta
 import json
 
-# Define constants
-SPLUNK_REALM = 'YOUR_REALM'  # e.g., 'us0', 'eu0', etc.
-SPLUNK_TOKEN = 'YOUR_TOKEN'
-ENDPOINT = f"https://api.{SPLUNK_REALM}.signalfx.com/v2/signalflow/query"
-HEADERS = {
-    'Content-Type': 'application/json',
-    'X-SF-Token': SPLUNK_TOKEN
+# Configuration
+REALM = "YOUR_REALM"
+TOKEN = "YOUR_TOKEN"
+API_ENDPOINT = f"https://api.{REALM}.signalfx.com/v2/signalflow/execute"
+
+# Calculate the time range (last 90 days)
+end_time = datetime.utcnow()
+start_time = end_time - timedelta(days=90)
+
+# SignalFlow program to fetch container CPU utilization
+program = """
+A = data('container_cpu_utilization')
+.publish()
+"""
+
+# Prepare the request payload
+payload = {
+    "program": program,
+    "start": int(start_time.timestamp() * 1000),
+    "end": int(end_time.timestamp() * 1000),
+    "resolution": 3600000,  # 1-hour resolution
+    "maxDelay": 0,
+    "immediate": True
 }
 
-# Helper function to get the last 90 days in milliseconds (since epoch)
-def get_last_90_days_time_range():
-    end_time = datetime.datetime.now()
-    start_time = end_time - datetime.timedelta(days=90)
-    return int(start_time.timestamp() * 1000), int(end_time.timestamp() * 1000)
+# Set up headers
+headers = {
+    "Content-Type": "application/json",
+    "X-SF-Token": TOKEN
+}
 
-# Fetch CPU utilization data from Splunk Observability
-def fetch_cpu_utilization():
-    start_ms, end_ms = get_last_90_days_time_range()
-    query = {
-        "programText": """
-        data('container_cpu_utilization', filter=filter("cluster", "*")).mean(by=['cluster', 'pod']).max()
-        """,
-        "start": start_ms,
-        "stop": end_ms
-    }
-    
-    response = requests.post(ENDPOINT, headers=HEADERS, data=json.dumps(query))
-    
-    if response.status_code != 200:
-        raise Exception(f"Error fetching data: {response.text}")
-    
-    return response.json()
+# Make the API request
+response = requests.post(API_ENDPOINT, headers=headers, json=payload)
 
-# Process data and categorize by clusters and pods
-def categorize_by_cluster_and_pod(data):
-    categorized_data = {}
+if response.status_code == 200:
+    # Process the response
+    data = response.json()
     
-    for record in data['data']['results']:
-        cluster = record['groupBy']['cluster']
-        pod = record['groupBy']['pod']
-        max_cpu_utilization = record['value']
+    # Initialize a dictionary to store max CPU utilization by cluster and pod
+    max_cpu_utilization = {}
 
-        if cluster not in categorized_data:
-            categorized_data[cluster] = {}
+    for tsid, ts_data in data.get("data", {}).items():
+        metadata = ts_data.get("metadata", {})
+        cluster = metadata.get("kubernetes_cluster", "unknown")
+        pod = metadata.get("kubernetes_pod_name", "unknown")
         
-        categorized_data[cluster][pod] = max(categorized_data[cluster].get(pod, 0), max_cpu_utilization)
-    
-    return categorized_data
-
-# Main function
-if __name__ == '__main__':
-    try:
-        print("Fetching CPU utilization data...")
-        raw_data = fetch_cpu_utilization()
-        categorized_data = categorize_by_cluster_and_pod(raw_data)
+        # Initialize the cluster in the dictionary if it doesn't exist
+        if cluster not in max_cpu_utilization:
+            max_cpu_utilization[cluster] = {}
         
-        for cluster, pods in categorized_data.items():
-            print(f"\nCluster: {cluster}")
-            for pod, max_cpu in pods.items():
-                print(f"  Pod: {pod}, Max CPU Utilization: {max_cpu:.2f}%")
-                
-    except Exception as e:
-        print(f"An error occurred: {str(e)}")
+        # Find the maximum CPU utilization for this pod
+        max_value = max(ts_data.get("values", [0]))
+        
+        # Update the max CPU utilization for this pod
+        if pod not in max_cpu_utilization[cluster] or max_value > max_cpu_utilization[cluster][pod]:
+            max_cpu_utilization[cluster][pod] = max_value
+
+    # Print the results
+    print("Maximum CPU Utilization by Cluster and Pod (last 90 days):")
+    for cluster, pods in max_cpu_utilization.items():
+        print(f"\nCluster: {cluster}")
+        for pod, max_cpu in pods.items():
+            print(f"  Pod: {pod}, Max CPU Utilization: {max_cpu:.2f}%")
+
+else:
+    print(f"Error: {response.status_code}")
+    print(response.text)
