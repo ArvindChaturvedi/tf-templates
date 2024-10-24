@@ -1,15 +1,23 @@
-import requests
-from datetime import datetime, timedelta
+import urllib3
 import json
+import certifi
+import ssl
+from datetime import datetime, timedelta
 
 # Configuration
 REALM = "YOUR_REALM"
 TOKEN = "YOUR_TOKEN"
 API_ENDPOINT = f"https://api.{REALM}.signalfx.com/v2/signalflow/execute"
 
+# Print SSL debugging information
+print(f"Python SSL version: {ssl.OPENSSL_VERSION}")
+print(f"Certifi version: {certifi.__version__}")
+print(f"Certifi path: {certifi.where()}")
+print(f"urllib3 version: {urllib3.__version__}")
+
 # Calculate the time range (last 90 days)
 end_time = datetime.utcnow()
-start_time = end_time - timedelta(days=7)
+start_time = end_time - timedelta(days=90)
 
 # SignalFlow program to fetch container CPU utilization
 program = """
@@ -33,36 +41,26 @@ headers = {
     "X-SF-Token": TOKEN
 }
 
-print("Request Details:")
-print(f"URL: {API_ENDPOINT}")
-print(f"Headers: {json.dumps(headers, indent=2)}")
-print(f"Payload: {json.dumps(payload, indent=2)}")
+def make_request(pool_manager):
+    try:
+        response = pool_manager.request('POST', API_ENDPOINT, 
+                                        body=json.dumps(payload).encode('utf-8'),
+                                        headers=headers)
+        if response.status == 200:
+            return json.loads(response.data.decode('utf-8'))
+        else:
+            print(f"Error: HTTP {response.status}")
+            print(f"Response: {response.data.decode('utf-8')}")
+            return None
+    except Exception as e:
+        print(f"An error occurred: {e}")
+        return None
 
-try:
-    # Make the API request
-    response = requests.post(API_ENDPOINT, headers=headers, json=payload)
-    
-    print(f"\nResponse Status Code: {response.status_code}")
-    print(f"Response Headers: {json.dumps(dict(response.headers), indent=2)}")
-    print(f"Response Content: {response.text[:1000]}...")  # Print first 1000 characters
-    
-    response.raise_for_status()
+# Make the API request
+https = urllib3.PoolManager(cert_reqs='CERT_REQUIRED', ca_certs=certifi.where())
+data = make_request(https)
 
-    # Process the response
-    data = response.json()
-    
-    # ... (rest of the script remains the same)
-
-except requests.exceptions.RequestException as e:
-    print(f"An error occurred: {e}")
-    if hasattr(e, 'response') and e.response is not None:
-        print(f"Error response content: {e.response.text}")
-
-
-if response.status_code == 200:
-    # Process the response
-    data = response.json()
-    
+if data:
     # Initialize a dictionary to store max CPU utilization by cluster and pod
     max_cpu_utilization = {}
 
@@ -88,7 +86,5 @@ if response.status_code == 200:
         print(f"\nCluster: {cluster}")
         for pod, max_cpu in pods.items():
             print(f"  Pod: {pod}, Max CPU Utilization: {max_cpu:.2f}%")
-
 else:
-    print(f"Error: {response.status_code}")
-    print(response.text)
+    print("Failed to retrieve data from the API.")
