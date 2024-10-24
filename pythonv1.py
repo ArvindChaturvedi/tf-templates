@@ -24,6 +24,13 @@ headers = {
 def make_request(method, url, body=None):
     try:
         response = https.request(method, url, body=json.dumps(body).encode('utf-8') if body else None, headers=headers)
+        print(f"Request URL: {url}")
+        print(f"Request method: {method}")
+        print(f"Request body: {json.dumps(body, indent=2) if body else 'None'}")
+        print(f"Response status: {response.status}")
+        print(f"Response headers: {response.headers}")
+        print(f"Response data: {response.data.decode('utf-8')[:200]}...")  # Print first 200 characters
+
         if response.status == 200:
             return response.status, json.loads(response.data.decode('utf-8'))
         else:
@@ -60,13 +67,13 @@ def fetch_cpu_utilization():
     end_time = datetime.utcnow()
     start_time = end_time - timedelta(days=90)
 
-    program = f"""
+    program_text = f"""
     data('{METRIC_NAME}', filter=filter('kubernetes_cluster', '*'))
     .publish()
     """
 
     body = {
-        "program": program,
+        "programText": program_text,
         "start": int(start_time.timestamp() * 1000),
         "end": int(end_time.timestamp() * 1000),
         "resolution": 3600000,  # 1-hour resolution
