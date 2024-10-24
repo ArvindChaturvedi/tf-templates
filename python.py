@@ -23,9 +23,10 @@ start_time = end_time - timedelta(days=90)
 program_text = f"""
 start_ms = {int(start_time.timestamp() * 1000)}
 end_ms = {int(end_time.timestamp() * 1000)}
+
 data('container_cpu_utilization', filter=filter('kubernetes_cluster', '*'))
-    .max(by=['kubernetes_cluster', 'kubernetes_pod_name'])
-    .publish()
+.max(by=['kubernetes_cluster', 'kubernetes_pod_name'])
+.publish()
 """
 
 # Prepare the request payload
@@ -77,9 +78,3 @@ if data:
 
     # Print the results
     print("Maximum CPU Utilization by Cluster and Pod (last 90 days):")
-    for cluster, pods in max_cpu_utilization.items():
-        print(f"\nCluster: {cluster}")
-        for pod, max_cpu in pods.items():
-            print(f"  Pod: {pod}, Max CPU Utilization: {max_cpu:.2f}%")
-else:
-    print("Failed to retrieve data from the API.")
