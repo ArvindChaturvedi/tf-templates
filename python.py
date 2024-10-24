@@ -1,93 +1,83 @@
 import urllib3
 import json
 import certifi
-import ssl
 from datetime import datetime, timedelta
 
-# Configuration
 REALM = "YOUR_REALM"
 TOKEN = "YOUR_TOKEN"
-API_ENDPOINT = f"https://api.{REALM}.signalfx.com/v2/signalflow/execute"
+BASE_URL = f"https://api.{REALM}.signalfx.com"
 
-# Print SSL debugging information
-print(f"Python SSL version: {ssl.OPENSSL_VERSION}")
-print(f"Certifi version: {certifi.__version__}")
-print(f"Certifi path: {certifi.where()}")
-print(f"urllib3 version: {urllib3.__version__}")
-
-# Calculate the time range (last 90 days)
-end_time = datetime.utcnow()
-start_time = end_time - timedelta(days=90)
-
-# SignalFlow program to fetch container CPU utilization
-program_text = """
-data('container_cpu_utilization').max(by=['kubernetes_cluster', 'kubernetes_pod_name']).publish()
-"""
-
-# Prepare the request payload
-payload = {
-    "program": program_text,
-    "start": int(start_time.timestamp() * 1000),
-    "end": int(end_time.timestamp() * 1000),
-    "resolution": 3600000,  # 1-hour resolution
-    "maxDelay": 0,
-    "immediate": True
-}
-
-# Set up headers
 headers = {
     "Content-Type": "application/json",
     "X-SF-Token": TOKEN
 }
 
-def make_request(pool_manager):
+https = urllib3.PoolManager(cert_reqs='CERT_REQUIRED', ca_certs=certifi.where())
+
+def make_request(method, url, body=None):
     try:
-        encoded_payload = json.dumps(payload).encode('utf-8')
-        print(f"Request payload: {encoded_payload.decode('utf-8')}")  # Debug print
-        
-        response = pool_manager.request('POST', API_ENDPOINT, 
-                                        body=encoded_payload,
-                                        headers=headers)
-        print(f"Response status: {response.status}")  # Debug print
-        print(f"Response headers: {response.headers}")  # Debug print
-        print(f"Response data: {response.data.decode('utf-8')[:1000]}")  # Debug print (first 1000 characters)
-        
-        if response.status == 200:
-            return json.loads(response.data.decode('utf-8'))
-        else:
-            print(f"Error: HTTP {response.status}")
-            print(f"Response: {response.data.decode('utf-8')}")
-            return None
+        response = https.request(method, url, body=json.dumps(body).encode('utf-8') if body else None, headers=headers)
+        print(f"Response status: {response.status}")
+        return response.status, json.loads(response.data.decode('utf-8'))
     except Exception as e:
         print(f"An error occurred: {e}")
-        return None
+        return None, str(e)
 
-# Make the API request
-https = urllib3.PoolManager(cert_reqs='CERT_REQUIRED', ca_certs=certifi.where())
-data = make_request(https)
+# Check if the metric exists
+metric_url = f"{BASE_URL}/v2/metric/container_cpu_utilization"
+status, data = make_request('GET', metric_url)
 
-if data:
-    # Initialize a dictionary to store max CPU utilization by cluster and pod
-    max_cpu_utilization = {}
+if status != 200:
+    print(f"Error: Metric 'container_cpu_utilization' not found. Status: {status}")
+    print(f"Response: {data}")
+    exit(1)
 
-    for tsid, ts_data in data.get("data", {}).items():
-        metadata = ts_data.get("metadata", {})
-        cluster = metadata.get("kubernetes_cluster", "unknown")
-        pod = metadata.get("kubernetes_pod_name", "unknown")
-        
-        # Find the maximum CPU utilization for this pod
-        max_value = max(ts_data.get("values", [0]))
-        
-        # Update the max CPU utilization for this pod
-        if cluster not in max_cpu_utilization:
-            max_cpu_utilization[cluster] = {}
-        max_cpu_utilization[cluster][pod] = max_value
+print("Metric 'container_cpu_utilization' found. Fetching data...")
 
-    # Print the results
-    print("Maximum CPU Utilization by Cluster and Pod (last 90 days):")
-    for cluster, pods in max_cpu_utilization.items():
-        print(f"\nCluster: {cluster}")
-        for pod, max_cpu in pods.items():
-            print(f"  Pod: {pod}, Max CPU Utilization: {max_cpu:.2f}%")
-else:
-    print("Failed to retrieve data from the API.")
+# Fetch data for the last 1 hour
+end_time = datetime.utcnow()
+start_time = end_time - timedelta(hours=1)
+
+program_text = """
+data('container_cpu_utilization', filter=filter('kubernetes_cluster', '*'))
+.max(by=['kubernetes_cluster', 'kubernetes_pod_name'])
+.publish()
+"""
+
+payload = {
+    "program": program_text,
+    "start": int(start_time.timestamp() * 1000),
+    "end": int(end_time.timestamp() * 1000),
+    "resolution": 60000,  # 1-minute resolution
+    "immediate": True
+}
+
+signalflow_url = f"{BASE_URL}/v2/signalflow/execute"
+status, data = make_request('POST', signalflow_url, payload)
+
+if status != 200:
+    print(f"Error fetching data. Status: {status}")
+    print(f"Response: {data}")
+    exit(1)
+
+# Process and print the results
+max_cpu_utilization = {}
+
+for tsid, ts_data in data.get("data", {}).items():
+    metadata = ts_data.get("metadata", {})
+    cluster = metadata.get("kubernetes_cluster", "unknown")
+    pod = metadata.get("kubernetes_pod_name", "unknown")
+    
+    # Find the maximum CPU utilization for this pod
+    max_value = max(ts_data.get("values", [0]))
+    
+    # Update the max CPU utilization for this pod
+    if cluster not in max_cpu_utilization:
+        max_cpu_utilization[cluster] = {}
+    max_cpu_utilization[cluster][pod] = max_value
+
+print("Maximum CPU Utilization by Cluster and Pod (last hour):")
+for cluster, pods in max_cpu_utilization.items():
+    print(f"\nCluster: {cluster}")
+    for pod, max_cpu in pods.items():
+        print(f"  Pod: {pod}, Max CPU Utilization: {max_cpu:.2f}%")
