@@ -1,13 +1,11 @@
-import urllib3
+import requests
 import json
-import ssl
 from datetime import datetime, timedelta
 import os
+import urllib3
 
-# Create an SSL context that ignores certificate verification
-ssl_context = ssl.create_default_context()
-ssl_context.check_hostname = False
-ssl_context.verify_mode = ssl.CERT_NONE
+# Suppress InsecureRequestWarning
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 # Configuration
 REALM = "YOUR_REALM"  # Replace with your realm
@@ -18,22 +16,15 @@ if not TOKEN:
 BASE_URL = f"https://api.{REALM}.signalfx.com"
 METRIC_NAME = "sf_metric::container_cpu_utilization"
 
-# Set up HTTP client
-https = urllib3.PoolManager(
-    ssl_version=ssl.PROTOCOL_TLS,
-    ssl_context=ssl_context
-)
-
 headers = {
     "Content-Type": "application/json",
     "X-SF-Token": TOKEN
 }
 
-def make_request(method, url, fields=None, body=None):
-    response = https.request(method, url, fields=fields, body=body, headers=headers)
-    if response.status != 200:
-        raise Exception(f"Request failed with status {response.status}: {response.data}")
-    return json.loads(response.data.decode('utf-8'))
+def make_request(method, url, params=None, json=None):
+    response = requests.request(method, url, headers=headers, params=params, json=json, verify=False)
+    response.raise_for_status()
+    return response.json()
 
 def fetch_all_metric_metadata():
     url = f"{BASE_URL}/v2/metrictimeseries"
@@ -45,7 +36,7 @@ def fetch_all_metric_metadata():
     all_metadata = []
     
     while True:
-        response = make_request('GET', url, fields=params)
+        response = make_request('GET', url, params=params)
         all_metadata.extend(response.get('results', []))
         
         if len(response.get('results', [])) < params['limit']:
@@ -70,7 +61,7 @@ def fetch_metric_data(tsid):
     
     all_data = []
     while True:
-        response = make_request('GET', url, fields=params)
+        response = make_request('GET', url, params=params)
         all_data.extend(response.get('data', []))
         
         if 'nextPageLink' not in response:
