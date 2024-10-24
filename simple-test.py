@@ -27,17 +27,39 @@ def make_request(method, url, params=None, data=None):
     response.raise_for_status()  # Raise an exception for bad status codes
     return response.json()
 
-def get_metric_list():
+def get_all_metrics():
     url = f"{BASE_URL}/v2/metric"
-    return make_request("GET", url)
+    all_metrics = []
+    offset = 0
+    limit = 1000  # Adjust this value if needed
+
+    while True:
+        params = {
+            "offset": offset,
+            "limit": limit
+        }
+        response_data = make_request("GET", url, params=params)
+        metrics = response_data.get('results', [])
+        all_metrics.extend(metrics)
+        
+        if len(metrics) < limit:
+            break
+
+        offset += limit
+        print(f"Retrieved {len(all_metrics)} metrics so far...")
+
+    return all_metrics
 
 def main():
-    print("Fetching list of metrics...")
+    print("Fetching all metrics...")
     try:
-        metrics = get_metric_list()
-        print(f"Successfully retrieved {len(metrics['results'])} metrics.")
+        all_metrics = get_all_metrics()
+        print(f"Successfully retrieved {len(all_metrics)} metrics in total.")
         print("First 5 metrics:")
-        for metric in metrics['results'][:5]:
+        for metric in all_metrics[:5]:
+            print(f"- {metric['name']}")
+        print(f"\nLast 5 metrics:")
+        for metric in all_metrics[-5:]:
             print(f"- {metric['name']}")
     except requests.exceptions.RequestException as e:
         print(f"An error occurred: {e}")
