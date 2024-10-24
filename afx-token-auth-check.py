@@ -1,9 +1,15 @@
 import urllib3
 import json
 import certifi
+import os
 
-REALM = "YOUR_REALM"
-TOKEN = "YOUR_TOKEN"
+# Get the token from environment variable
+TOKEN = os.environ.get('YOUR_TOKEN')
+if not TOKEN:
+    print("Error: YOUR_TOKEN environment variable is not set.")
+    exit(1)
+
+REALM = "YOUR_REALM"  # Replace this with your actual realm
 
 https = urllib3.PoolManager(cert_reqs='CERT_REQUIRED', ca_certs=certifi.where())
 base_url = f"https://api.{REALM}.signalfx.com"
@@ -15,10 +21,21 @@ headers = {
 
 def make_request(url):
     try:
-        response = https.request('GET', url, headers=headers)
-        return response.status, json.loads(response.data.decode('utf-8'))
+        response = https.request('GET', url, headers=headers, timeout=10.0)
+        print(f"Response status: {response.status}")
+        print(f"Response headers: {response.headers}")
+        print(f"Response data: {response.data.decode('utf-8')[:200]}...")  # Print first 200 characters
+        
+        if response.status == 200:
+            return response.status, json.loads(response.data.decode('utf-8'))
+        else:
+            return response.status, response.data.decode('utf-8')
+    except urllib3.exceptions.HTTPError as e:
+        return None, f"HTTP Error: {str(e)}"
+    except json.JSONDecodeError as e:
+        return None, f"JSON Decode Error: {str(e)}"
     except Exception as e:
-        return None, str(e)
+        return None, f"Unexpected Error: {str(e)}"
 
 print("Splunk Observability Cloud Token Privilege Check")
 print("================================================")
@@ -30,26 +47,16 @@ status, data = make_request(f"{base_url}/v2/accesstoken")
 
 if status == 200:
     print("Successfully retrieved token information.")
-    print("\nToken Details:")
-    print(f"Name: {data.get('name', 'N/A')}")
-    print(f"Description: {data.get('description', 'N/A')}")
-    print(f"Created By: {data.get('created_by', 'N/A')}")
-    print(f"Created At: {data.get('created_at', 'N/A')}")
-    
-    print("\nPrivileges:")
-    if 'auth_scopes' in data:
+    print("\nToken Privileges (auth_scopes):")
+    if isinstance(data, dict) and 'auth_scopes' in data and data['auth_scopes']:
         for scope in data['auth_scopes']:
             print(f"- {scope}")
+    elif isinstance(data, dict) and 'auth_scopes' in data and not data['auth_scopes']:
+        print("No specific auth_scopes listed. This might indicate full access.")
     else:
-        print("No specific privileges listed. This might indicate full access.")
-    
-    print("\nLimits:")
-    if 'limits' in data:
-        for limit_name, limit_value in data['limits'].items():
-            print(f"- {limit_name}: {limit_value}")
-    else:
-        print("No specific limits listed.")
+        print("Unable to retrieve auth_scopes information.")
 else:
-    print(f"Failed to retrieve token information. Status: {status}, Response: {data}")
+    print(f"Failed to retrieve token information. Status: {status}")
+    print(f"Response: {data}")
 
 print("\nCheck Complete")
