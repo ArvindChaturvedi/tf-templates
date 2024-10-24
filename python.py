@@ -20,18 +20,18 @@ end_time = datetime.utcnow()
 start_time = end_time - timedelta(days=90)
 
 # SignalFlow program to fetch container CPU utilization
-program_text = f"""
-start_ms = {int(start_time.timestamp() * 1000)}
-end_ms = {int(end_time.timestamp() * 1000)}
-
-data('container_cpu_utilization', filter=filter('kubernetes_cluster', '*'))
-.max(by=['kubernetes_cluster', 'kubernetes_pod_name'])
-.publish()
+program_text = """
+data('container_cpu_utilization').max(by=['kubernetes_cluster', 'kubernetes_pod_name']).publish()
 """
 
 # Prepare the request payload
 payload = {
-    "programText": program_text,
+    "program": program_text,
+    "start": int(start_time.timestamp() * 1000),
+    "end": int(end_time.timestamp() * 1000),
+    "resolution": 3600000,  # 1-hour resolution
+    "maxDelay": 0,
+    "immediate": True
 }
 
 # Set up headers
@@ -42,9 +42,16 @@ headers = {
 
 def make_request(pool_manager):
     try:
+        encoded_payload = json.dumps(payload).encode('utf-8')
+        print(f"Request payload: {encoded_payload.decode('utf-8')}")  # Debug print
+        
         response = pool_manager.request('POST', API_ENDPOINT, 
-                                        body=json.dumps(payload).encode('utf-8'),
+                                        body=encoded_payload,
                                         headers=headers)
+        print(f"Response status: {response.status}")  # Debug print
+        print(f"Response headers: {response.headers}")  # Debug print
+        print(f"Response data: {response.data.decode('utf-8')[:1000]}")  # Debug print (first 1000 characters)
+        
         if response.status == 200:
             return json.loads(response.data.decode('utf-8'))
         else:
@@ -78,3 +85,9 @@ if data:
 
     # Print the results
     print("Maximum CPU Utilization by Cluster and Pod (last 90 days):")
+    for cluster, pods in max_cpu_utilization.items():
+        print(f"\nCluster: {cluster}")
+        for pod, max_cpu in pods.items():
+            print(f"  Pod: {pod}, Max CPU Utilization: {max_cpu:.2f}%")
+else:
+    print("Failed to retrieve data from the API.")
