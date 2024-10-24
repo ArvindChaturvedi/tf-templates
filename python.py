@@ -5,7 +5,7 @@ from datetime import datetime, timedelta
 
 REALM = "YOUR_REALM"
 TOKEN = "YOUR_TOKEN"
-BASE_URL = f"https://api.{REALM}.signalfx.com"
+BASE_URL = f"https://stream.{REALM}.signalfx.com"  # Note the change to 'stream' subdomain
 
 headers = {
     "Content-Type": "application/json",
@@ -18,21 +18,10 @@ def make_request(method, url, body=None):
     try:
         response = https.request(method, url, body=json.dumps(body).encode('utf-8') if body else None, headers=headers)
         print(f"Response status: {response.status}")
-        return response.status, json.loads(response.data.decode('utf-8'))
+        return response.status, response.data
     except Exception as e:
         print(f"An error occurred: {e}")
         return None, str(e)
-
-# Check if the metric exists
-metric_url = f"{BASE_URL}/v2/metric/container_cpu_utilization"
-status, data = make_request('GET', metric_url)
-
-if status != 200:
-    print(f"Error: Metric 'container_cpu_utilization' not found. Status: {status}")
-    print(f"Response: {data}")
-    exit(1)
-
-print("Metric 'container_cpu_utilization' found. Fetching data...")
 
 # Fetch data for the last 1 hour
 end_time = datetime.utcnow()
@@ -44,16 +33,8 @@ data('container_cpu_utilization', filter=filter('kubernetes_cluster', '*'))
 .publish()
 """
 
-payload = {
-    "programText": program_text,
-    "start": int(start_time.timestamp() * 1000),
-    "end": int(end_time.timestamp() * 1000),
-    "resolution": 60000,  # 1-minute resolution
-    "immediate": True
-}
-
-signalflow_url = f"{BASE_URL}/v2/signalflow/execute"
-status, data = make_request('POST', signalflow_url, payload)
+signalflow_url = f"{BASE_URL}/v2/signalflow"
+status, data = make_request('POST', signalflow_url, {"program": program_text})
 
 if status != 200:
     print(f"Error fetching data. Status: {status}")
@@ -63,18 +44,24 @@ if status != 200:
 # Process and print the results
 max_cpu_utilization = {}
 
-for tsid, ts_data in data.get("data", {}).items():
-    metadata = ts_data.get("metadata", {})
-    cluster = metadata.get("kubernetes_cluster", "unknown")
-    pod = metadata.get("kubernetes_pod_name", "unknown")
-    
-    # Find the maximum CPU utilization for this pod
-    max_value = max(ts_data.get("values", [0]))
-    
-    # Update the max CPU utilization for this pod
-    if cluster not in max_cpu_utilization:
-        max_cpu_utilization[cluster] = {}
-    max_cpu_utilization[cluster][pod] = max_value
+# Parse the streaming data
+for line in data.split(b'\n'):
+    if line:
+        try:
+            message = json.loads(line)
+            if message['type'] == 'data':
+                tsid = message['tsId']
+                metadata = message['metadata']
+                cluster = metadata.get('kubernetes_cluster', 'unknown')
+                pod = metadata.get('kubernetes_pod_name', 'unknown')
+                value = message['value']
+                
+                if cluster not in max_cpu_utilization:
+                    max_cpu_utilization[cluster] = {}
+                if pod not in max_cpu_utilization[cluster] or value > max_cpu_utilization[cluster][pod]:
+                    max_cpu_utilization[cluster][pod] = value
+        except json.JSONDecodeError:
+            continue
 
 print("Maximum CPU Utilization by Cluster and Pod (last hour):")
 for cluster, pods in max_cpu_utilization.items():
