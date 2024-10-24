@@ -9,7 +9,7 @@ API_ENDPOINT = f"https://api.{REALM}.signalfx.com/v2/signalflow/execute"
 
 # Calculate the time range (last 90 days)
 end_time = datetime.utcnow()
-start_time = end_time - timedelta(days=90)
+start_time = end_time - timedelta(days=7)
 
 # SignalFlow program to fetch container CPU utilization
 program = """
@@ -33,8 +33,31 @@ headers = {
     "X-SF-Token": TOKEN
 }
 
-# Make the API request
-response = requests.post(API_ENDPOINT, headers=headers, json=payload)
+print("Request Details:")
+print(f"URL: {API_ENDPOINT}")
+print(f"Headers: {json.dumps(headers, indent=2)}")
+print(f"Payload: {json.dumps(payload, indent=2)}")
+
+try:
+    # Make the API request
+    response = requests.post(API_ENDPOINT, headers=headers, json=payload)
+    
+    print(f"\nResponse Status Code: {response.status_code}")
+    print(f"Response Headers: {json.dumps(dict(response.headers), indent=2)}")
+    print(f"Response Content: {response.text[:1000]}...")  # Print first 1000 characters
+    
+    response.raise_for_status()
+
+    # Process the response
+    data = response.json()
+    
+    # ... (rest of the script remains the same)
+
+except requests.exceptions.RequestException as e:
+    print(f"An error occurred: {e}")
+    if hasattr(e, 'response') and e.response is not None:
+        print(f"Error response content: {e.response.text}")
+
 
 if response.status_code == 200:
     # Process the response
