@@ -8,13 +8,13 @@ import urllib3
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 # Configuration
-REALM = "YOUR_REALM"  # Replace with your realm
+REALM = input("Please enter your Splunk Observability Cloud realm (e.g., us1, eu0): ").strip()
 TOKEN = os.environ.get('YOUR_TOKEN')
 if not TOKEN:
-    raise ValueError("Error: YOUR_TOKEN environment variable is not set.")
+    TOKEN = input("Please enter your Splunk Observability Cloud API token: ").strip()
 
 BASE_URL = f"https://api.{REALM}.signalfx.com"
-METRIC_NAME = "sf_metric::container_cpu_utilization"
+METRIC_NAME = "container_cpu_utilization"
 
 headers = {
     "Content-Type": "application/json",
@@ -22,9 +22,13 @@ headers = {
 }
 
 def make_request(method, url, params=None, json=None):
-    response = requests.request(method, url, headers=headers, params=params, json=json, verify=False)
-    response.raise_for_status()
-    return response.json()
+    try:
+        response = requests.request(method, url, headers=headers, params=params, json=json, verify=False)
+        response.raise_for_status()
+        return response.json()
+    except requests.exceptions.RequestException as e:
+        print(f"Error making request to {url}: {str(e)}")
+        return None
 
 def fetch_all_metric_metadata():
     url = f"{BASE_URL}/v2/metrictimeseries"
@@ -37,6 +41,9 @@ def fetch_all_metric_metadata():
     
     while True:
         response = make_request('GET', url, params=params)
+        if response is None:
+            print("Failed to fetch metadata. Exiting.")
+            return []
         all_metadata.extend(response.get('results', []))
         
         if len(response.get('results', [])) < params['limit']:
@@ -62,6 +69,9 @@ def fetch_metric_data(tsid):
     all_data = []
     while True:
         response = make_request('GET', url, params=params)
+        if response is None:
+            print(f"Failed to fetch data for tsid {tsid}. Skipping.")
+            return []
         all_data.extend(response.get('data', []))
         
         if 'nextPageLink' not in response:
@@ -92,8 +102,13 @@ def process_data(metadata, all_data):
     return max_cpu_utilization
 
 def main():
+    print(f"Using Splunk Observability Cloud realm: {REALM}")
+    print(f"API URL: {BASE_URL}")
+    
     print("Fetching all metric metadata...")
     metadata = fetch_all_metric_metadata()
+    if not metadata:
+        return
     print(f"Total metadata entries fetched: {len(metadata)}")
     
     print("\nFetching metric data for the last 90 days...")
