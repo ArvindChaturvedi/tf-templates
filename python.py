@@ -20,14 +20,13 @@ end_time = datetime.utcnow()
 start_time = end_time - timedelta(days=90)
 
 # SignalFlow program to fetch container CPU utilization
-program = """
-A = data('container_cpu_utilization')
-.publish()
+program_text = """
+data('container_cpu_utilization').publish()
 """
 
 # Prepare the request payload
 payload = {
-    "program": program,
+    "programText": program_text,
     "start": int(start_time.timestamp() * 1000),
     "end": int(end_time.timestamp() * 1000),
     "resolution": 3600000,  # 1-hour resolution
