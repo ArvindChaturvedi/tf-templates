@@ -1,143 +1,81 @@
-import socket
-import urllib3.util
-import certifi
-import json
 import urllib3
+import json
+import certifi
+import time
 
-# Configuration
 REALM = "YOUR_REALM"
 TOKEN = "YOUR_TOKEN"
 
-print("Splunk Observability Cloud API Diagnostics")
-print("==========================================")
-
-# 1. DNS Resolution Test
-print("\n1. DNS Resolution Test")
-print("----------------------")
-
-domains_to_test = [
-    f"api.{REALM}.signalfx.com",
-    f"stream.{REALM}.signalfx.com",
-    f"{REALM}.signalfx.com",
-    f"ingest.{REALM}.signalfx.com",
-    "www.google.com"  # As a control
-]
-
-for domain in domains_to_test:
-    try:
-        ip = socket.gethostbyname(domain)
-        print(f"Successfully resolved {domain} to {ip}")
-    except socket.gaierror as e:
-        print(f"Failed to resolve {domain}: {e}")
-
-# 2. HTTPS Connection Test
-print("\n2. HTTPS Connection Test")
-print("------------------------")
-
 https = urllib3.PoolManager(cert_reqs='CERT_REQUIRED', ca_certs=certifi.where())
+base_url = f"https://api.{REALM}.signalfx.com"
 
-urls_to_test = [
-    "https://api.signalfx.com",
-    "https://www.google.com"
-]
-
-for url in urls_to_test:
-    try:
-        response = https.request('GET', url)
-        print(f"Successfully connected to {url}. Status code: {response.status}")
-    except Exception as e:
-        print(f"Failed to connect to {url}: {e}")
-
-# 3. API Token Test
-print("\n3. API Token Test")
-print("-----------------")
-
-url = f"https://api.{REALM}.signalfx.com/v2/organization"
 headers = {
+    "Content-Type": "application/json",
     "X-SF-Token": TOKEN
 }
 
-try:
-    response = https.request('GET', url, headers=headers)
-    print(f"Response status: {response.status}")
-    if response.status == 200:
-        data = json.loads(response.data.decode('utf-8'))
-        print(f"Organization name: {data.get('name')}")
+def make_request(method, url, body=None):
+    try:
+        response = https.request(method, url, 
+                                 body=json.dumps(body).encode('utf-8') if body else None,
+                                 headers=headers)
+        return response.status, json.loads(response.data.decode('utf-8'))
+    except Exception as e:
+        return None, str(e)
+
+print("Splunk Observability Cloud API Access Test")
+print("==========================================")
+
+# 1. List Metrics
+print("\n1. List Available Metrics")
+print("--------------------------")
+status, data = make_request('GET', f"{base_url}/v2/metric")
+if status == 200:
+    print(f"Successfully retrieved metrics. Total metrics: {len(data['results'])}")
+    print("First 5 metrics:")
+    for metric in data['results'][:5]:
+        print(f"- {metric['name']}")
+else:
+    print(f"Failed to retrieve metrics. Status: {status}, Response: {data}")
+
+# 2. Get Metric Metadata
+print("\n2. Get Metric Metadata")
+print("-----------------------")
+if status == 200 and data['results']:
+    sample_metric = data['results'][0]['name']
+    status, metadata = make_request('GET', f"{base_url}/v2/metric/{sample_metric}")
+    if status == 200:
+        print(f"Metadata for '{sample_metric}':")
+        print(json.dumps(metadata, indent=2))
     else:
-        print(f"Response data: {response.data.decode('utf-8')}")
-except Exception as e:
-    print(f"An error occurred: {e}")
+        print(f"Failed to retrieve metadata. Status: {status}, Response: {metadata}")
+else:
+    print("Skipped due to failure in retrieving metrics list.")
 
-# 4. SignalFlow API Test
-import time  # Add this to your imports at the top of the file
-
-# Replace the SignalFlow API Test section with this:
-print("\n4. SignalFlow API Test")
-print("----------------------")
-
-base_url = f"https://api.{REALM}.signalfx.com"
-execute_url = f"{base_url}/v2/signalflow/execute"
-
-program_text = """
-data('cpu.utilization').publish()
-"""
-
-current_time_ms = int(time.time() * 1000)
+# 3. Test SignalFlow
+print("\n3. Test SignalFlow")
+print("------------------")
+program_text = "data('cpu.utilization').publish()"
 payload = {
     "programText": program_text,
-    "start": current_time_ms - 900000,  # 15 minutes ago
-    "stop": current_time_ms,  # now
-    "resolution": 60000,
-    "maxDelay": 0,
-    "immediate": True
 }
 
-headers.update({"Content-Type": "application/json"})
-
-try:
-    response = https.request('POST', execute_url, 
-                             body=json.dumps(payload).encode('utf-8'),
-                             headers=headers)
-    print(f"SignalFlow Execute API Status: {response.status}")
-    if response.status == 200:
-        print("Successfully connected to SignalFlow Execute API")
-        data = json.loads(response.data.decode('utf-8'))
-        print(f"Response data: {json.dumps(data, indent=2)[:1000]}...")  # First 1000 characters
-    else:
-        print(f"Failed to connect. Response: {response.data.decode('utf-8')}")
-except Exception as e:
-    print(f"Failed to connect to SignalFlow Execute API: {e}")
-
-print("\n5. List Metrics Test")
-print("-------------------")
-
-list_metrics_url = f"{base_url}/v2/metric"
-
-try:
-    response = https.request('GET', list_metrics_url, headers=headers)
-    print(f"List Metrics API Status: {response.status}")
-    if response.status == 200:
-        data = json.loads(response.data.decode('utf-8'))
-        print(f"First few metrics: {data['results'][:5]}")
-    else:
-        print(f"Failed to list metrics. Response: {response.data.decode('utf-8')}")
-except Exception as e:
-    print(f"Failed to connect to List Metrics API: {e}")
-
-try:
-    response = https.request('POST', execute_url, 
-                             body=json.dumps(payload).encode('utf-8'),
-                             headers=headers)
-    print(f"SignalFlow Execute API Status: {response.status}")
-    if response.status == 200:
-        print("Successfully connected to SignalFlow Execute API")
-        data = json.loads(response.data.decode('utf-8'))
-        print(f"Response data: {json.dumps(data, indent=2)[:1000]}...")  # First 1000 characters
-    else:
-        print(f"Failed to connect. Response: {response.data.decode('utf-8')}")
-except Exception as e:
-    print(f"Failed to connect to SignalFlow Execute API: {e}")
+status, data = make_request('POST', f"{base_url}/v2/signalflow/execute", payload)
+if status == 200:
+    print("Successfully executed SignalFlow program.")
+    print("Response:")
+    print(json.dumps(data, indent=2)[:1000])  # Print first 1000 characters
 else:
-    print("Failed to connect to any SignalFlow API endpoint")
+    print(f"Failed to execute SignalFlow program. Status: {status}, Response: {data}")
 
-print("\nDiagnostics Complete")
+    # If failed, try without any additional parameters
+    print("\nTrying SignalFlow without additional parameters:")
+    status, data = make_request('POST', f"{base_url}/v2/signalflow/execute", {"program": program_text})
+    if status == 200:
+        print("Successfully executed SignalFlow program without additional parameters.")
+        print("Response:")
+        print(json.dumps(data, indent=2)[:1000])  # Print first 1000 characters
+    else:
+        print(f"Failed to execute SignalFlow program. Status: {status}, Response: {data}")
+
+print("\nTest Complete")
