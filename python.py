@@ -20,18 +20,17 @@ end_time = datetime.utcnow()
 start_time = end_time - timedelta(days=90)
 
 # SignalFlow program to fetch container CPU utilization
-program_text = """
-data('container_cpu_utilization').publish()
+program_text = f"""
+start_ms = {int(start_time.timestamp() * 1000)}
+end_ms = {int(end_time.timestamp() * 1000)}
+data('container_cpu_utilization', filter=filter('kubernetes_cluster', '*'))
+    .max(by=['kubernetes_cluster', 'kubernetes_pod_name'])
+    .publish()
 """
 
 # Prepare the request payload
 payload = {
     "programText": program_text,
-    "start": int(start_time.timestamp() * 1000),
-    "end": int(end_time.timestamp() * 1000),
-    "resolution": 3600000,  # 1-hour resolution
-    "maxDelay": 0,
-    "immediate": True
 }
 
 # Set up headers
@@ -68,16 +67,13 @@ if data:
         cluster = metadata.get("kubernetes_cluster", "unknown")
         pod = metadata.get("kubernetes_pod_name", "unknown")
         
-        # Initialize the cluster in the dictionary if it doesn't exist
-        if cluster not in max_cpu_utilization:
-            max_cpu_utilization[cluster] = {}
-        
         # Find the maximum CPU utilization for this pod
         max_value = max(ts_data.get("values", [0]))
         
         # Update the max CPU utilization for this pod
-        if pod not in max_cpu_utilization[cluster] or max_value > max_cpu_utilization[cluster][pod]:
-            max_cpu_utilization[cluster][pod] = max_value
+        if cluster not in max_cpu_utilization:
+            max_cpu_utilization[cluster] = {}
+        max_cpu_utilization[cluster][pod] = max_value
 
     # Print the results
     print("Maximum CPU Utilization by Cluster and Pod (last 90 days):")
