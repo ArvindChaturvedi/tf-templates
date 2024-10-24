@@ -22,6 +22,7 @@ headers = {
 def make_request(url):
     try:
         response = https.request('GET', url, headers=headers, timeout=10.0)
+        print(f"URL: {url}")
         print(f"Response status: {response.status}")
         print(f"Response headers: {response.headers}")
         print(f"Response data: {response.data.decode('utf-8')[:200]}...")  # Print first 200 characters
@@ -30,33 +31,37 @@ def make_request(url):
             return response.status, json.loads(response.data.decode('utf-8'))
         else:
             return response.status, response.data.decode('utf-8')
-    except urllib3.exceptions.HTTPError as e:
-        return None, f"HTTP Error: {str(e)}"
-    except json.JSONDecodeError as e:
-        return None, f"JSON Decode Error: {str(e)}"
     except Exception as e:
-        return None, f"Unexpected Error: {str(e)}"
+        return None, f"Error: {str(e)}"
 
-print("Splunk Observability Cloud Token Privilege Check")
-print("================================================")
+print("Splunk Observability Cloud API Access Check")
+print("===========================================")
 
-# Check Token Privileges
-print("\nChecking Token Privileges")
-print("--------------------------")
-status, data = make_request(f"{base_url}/v2/accesstoken")
+# List of endpoints to check
+endpoints = [
+    "/v2/accesstoken",
+    "/v2/organization",
+    "/v2/metric",
+    "/v2/detector",
+    "/v2/dashboard"
+]
 
-if status == 200:
-    print("Successfully retrieved token information.")
-    print("\nToken Privileges (auth_scopes):")
-    if isinstance(data, dict) and 'auth_scopes' in data and data['auth_scopes']:
-        for scope in data['auth_scopes']:
-            print(f"- {scope}")
-    elif isinstance(data, dict) and 'auth_scopes' in data and not data['auth_scopes']:
-        print("No specific auth_scopes listed. This might indicate full access.")
+for endpoint in endpoints:
+    print(f"\nChecking endpoint: {endpoint}")
+    print("-" * (len(endpoint) + 19))
+    status, data = make_request(f"{base_url}{endpoint}")
+    
+    if status == 200:
+        print(f"Successfully accessed {endpoint}")
+        if isinstance(data, dict):
+            if 'results' in data:
+                print(f"Number of items: {len(data['results'])}")
+            elif 'auth_scopes' in data:
+                print("Auth scopes:")
+                for scope in data['auth_scopes']:
+                    print(f"- {scope}")
     else:
-        print("Unable to retrieve auth_scopes information.")
-else:
-    print(f"Failed to retrieve token information. Status: {status}")
-    print(f"Response: {data}")
+        print(f"Failed to access {endpoint}. Status: {status}")
+        print(f"Response: {data}")
 
 print("\nCheck Complete")
