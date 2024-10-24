@@ -1,7 +1,8 @@
 import socket
-import urllib3
+import urllib3.util
 import certifi
 import json
+import urllib3
 
 # Configuration
 REALM = "YOUR_REALM"
@@ -71,45 +72,37 @@ except Exception as e:
 print("\n4. SignalFlow API Test")
 print("----------------------")
 
-base_urls = [
-    f"https://stream.{REALM}.signalfx.com",
-    f"https://api.{REALM}.signalfx.com",
-    f"https://{REALM}.signalfx.com",
-    f"https://ingest.{REALM}.signalfx.com"
-]
+base_url = f"https://api.{REALM}.signalfx.com"
+execute_url = f"{base_url}/v2/signalflow/execute"
 
 program_text = """
 data('cpu.utilization').publish()
 """
 
-for base_url in base_urls:
-    print(f"\nTrying base URL: {base_url}")
-    
-    # Try SignalFlow endpoint
-    signalflow_url = f"{base_url}/v2/signalflow"
-    try:
-        response = https.request('POST', signalflow_url, 
-                                 body=json.dumps({"program": program_text}).encode('utf-8'),
-                                 headers=headers)
-        print(f"SignalFlow API Status: {response.status}")
-        if response.status == 200:
-            print("Successfully connected to SignalFlow API")
-            break
-    except Exception as e:
-        print(f"Failed to connect to SignalFlow API: {e}")
-    
-    # If SignalFlow fails, try the execute endpoint
-    execute_url = f"{base_url}/v2/signalflow/execute"
-    try:
-        response = https.request('POST', execute_url, 
-                                 body=json.dumps({"programText": program_text}).encode('utf-8'),
-                                 headers=headers)
-        print(f"SignalFlow Execute API Status: {response.status}")
-        if response.status == 200:
-            print("Successfully connected to SignalFlow Execute API")
-            break
-    except Exception as e:
-        print(f"Failed to connect to SignalFlow Execute API: {e}")
+payload = {
+    "programText": program_text,
+    "start": int(urllib3.util.timeout.current_time() * 1000) - 900000,  # 15 minutes ago
+    "stop": int(urllib3.util.timeout.current_time() * 1000),  # now
+    "resolution": 60000,
+    "maxDelay": 0,
+    "immediate": True
+}
+
+headers.update({"Content-Type": "application/json"})
+
+try:
+    response = https.request('POST', execute_url, 
+                             body=json.dumps(payload).encode('utf-8'),
+                             headers=headers)
+    print(f"SignalFlow Execute API Status: {response.status}")
+    if response.status == 200:
+        print("Successfully connected to SignalFlow Execute API")
+        data = json.loads(response.data.decode('utf-8'))
+        print(f"Response data: {json.dumps(data, indent=2)[:1000]}...")  # First 1000 characters
+    else:
+        print(f"Failed to connect. Response: {response.data.decode('utf-8')}")
+except Exception as e:
+    print(f"Failed to connect to SignalFlow Execute API: {e}")
 else:
     print("Failed to connect to any SignalFlow API endpoint")
 
