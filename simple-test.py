@@ -19,10 +19,8 @@ def make_request(method, url, params=None, data=None):
     response = requests.request(method, url, headers=headers, params=params, json=data)
     print(f"Request URL: {response.url}")
     print(f"Request method: {method}")
-    print(f"Request body: {data}")
+    print(f"Request params: {params}")
     print(f"Response status: {response.status_code}")
-    print(f"Response headers: {response.headers}")
-    print(f"Response content: {response.text[:200]}...")  # Print first 200 characters
     
     response.raise_for_status()  # Raise an exception for bad status codes
     return response.json()
@@ -32,6 +30,7 @@ def get_all_metrics():
     all_metrics = []
     offset = 0
     limit = 1000  # Adjust this value if needed
+    total_metrics = None
 
     while True:
         params = {
@@ -42,20 +41,32 @@ def get_all_metrics():
         metrics = response_data.get('results', [])
         all_metrics.extend(metrics)
         
+        if total_metrics is None:
+            total_metrics = response_data.get('count')
+            print(f"Total metrics reported by API: {total_metrics}")
+
+        print(f"Retrieved {len(metrics)} metrics in this batch. Total retrieved so far: {len(all_metrics)}")
+        
         if len(metrics) < limit:
             break
 
         offset += limit
-        print(f"Retrieved {len(all_metrics)} metrics so far...")
 
-    return all_metrics
+    return all_metrics, total_metrics
 
 def main():
     print("Fetching all metrics...")
     try:
-        all_metrics = get_all_metrics()
-        print(f"Successfully retrieved {len(all_metrics)} metrics in total.")
-        print("First 5 metrics:")
+        all_metrics, total_metrics = get_all_metrics()
+        print(f"\nSuccessfully retrieved {len(all_metrics)} metrics in total.")
+        print(f"Total metrics reported by API: {total_metrics}")
+        
+        if len(all_metrics) < total_metrics:
+            print(f"Warning: Retrieved fewer metrics than reported by the API.")
+        elif len(all_metrics) > total_metrics:
+            print(f"Warning: Retrieved more metrics than initially reported by the API.")
+        
+        print("\nFirst 5 metrics:")
         for metric in all_metrics[:5]:
             print(f"- {metric['name']}")
         print(f"\nLast 5 metrics:")
