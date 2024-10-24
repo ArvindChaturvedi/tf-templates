@@ -1,7 +1,11 @@
-import requests
+import urllib3
 import json
+import certifi
 from datetime import datetime, timedelta
 import os
+
+# Disable InsecureRequestWarning
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 # Configuration
 REALM = "YOUR_REALM"  # Replace with your realm
@@ -12,15 +16,22 @@ if not TOKEN:
 BASE_URL = f"https://api.{REALM}.signalfx.com"
 METRIC_NAME = "sf_metric::container_cpu_utilization"
 
+# Set up HTTP client
+https = urllib3.PoolManager(
+    cert_reqs='CERT_NONE',  # Disable certificate verification
+    ca_certs=certifi.where()
+)
+
 headers = {
     "Content-Type": "application/json",
     "X-SF-Token": TOKEN
 }
 
-def make_request(url, params=None):
-    response = requests.get(url, headers=headers, params=params)
-    response.raise_for_status()
-    return response.json()
+def make_request(method, url, fields=None, body=None):
+    response = https.request(method, url, fields=fields, body=body, headers=headers)
+    if response.status != 200:
+        raise Exception(f"Request failed with status {response.status}: {response.data}")
+    return json.loads(response.data.decode('utf-8'))
 
 def fetch_all_metric_metadata():
     url = f"{BASE_URL}/v2/metrictimeseries"
@@ -32,7 +43,7 @@ def fetch_all_metric_metadata():
     all_metadata = []
     
     while True:
-        response = make_request(url, params)
+        response = make_request('GET', url, fields=params)
         all_metadata.extend(response.get('results', []))
         
         if len(response.get('results', [])) < params['limit']:
@@ -57,7 +68,7 @@ def fetch_metric_data(tsid):
     
     all_data = []
     while True:
-        response = make_request(url, params)
+        response = make_request('GET', url, fields=params)
         all_data.extend(response.get('data', []))
         
         if 'nextPageLink' not in response:
