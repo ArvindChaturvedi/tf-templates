@@ -10,7 +10,7 @@ TOKEN = os.environ.get('YOUR_TOKEN')
 if not TOKEN:
     raise ValueError("Error: YOUR_TOKEN environment variable is not set.")
 
-BASE_URL = f"https://api.{REALM}.signalfx.com"
+BASE_URL = f"https://stream.{REALM}.signalfx.com"  # Note the change to 'stream' subdomain
 METRIC_NAME = "container_cpu_utilization"
 
 # Set up HTTP client
@@ -31,57 +31,29 @@ def make_request(method, url, body=None):
         print(f"Response headers: {response.headers}")
         print(f"Response data: {response.data.decode('utf-8')[:200]}...")  # Print first 200 characters
 
-        if response.status == 200:
-            return response.status, json.loads(response.data.decode('utf-8'))
-        else:
-            return response.status, response.data.decode('utf-8')
+        return response.status, response.data
     except Exception as e:
         return None, str(e)
-
-def get_all_metrics():
-    all_metrics = []
-    offset = 0
-    limit = 1000
-
-    while True:
-        url = f"{BASE_URL}/v2/metric?limit={limit}&offset={offset}"
-        status, data = make_request('GET', url)
-
-        if status != 200:
-            print(f"Failed to retrieve metrics. Status: {status}")
-            print(f"Response: {data}")
-            break
-
-        metrics = data.get('results', [])
-        all_metrics.extend(metrics)
-        
-        if len(metrics) < limit:
-            break
-
-        offset += limit
-        print(f"Retrieved {len(all_metrics)} metrics so far...")
-
-    return all_metrics
 
 def fetch_cpu_utilization():
     end_time = datetime.utcnow()
     start_time = end_time - timedelta(days=90)
 
-    program_text = f"""
+    program = f"""
     data('{METRIC_NAME}', filter=filter('kubernetes_cluster', '*'))
     .publish()
     """
 
     body = {
-        "programText": program_text,
+        "program": program,
         "start": int(start_time.timestamp() * 1000),
-        "end": int(end_time.timestamp() * 1000),
+        "stop": int(end_time.timestamp() * 1000),
         "resolution": 3600000,  # 1-hour resolution
         "maxDelay": 0,
         "immediate": True
     }
 
-    status, data = make_request('POST', f"{BASE_URL}/v2/signalflow/execute", body)
+    status, data = make_request('POST', f"{BASE_URL}/v2/signalflow", body)
 
     if status != 200:
         print(f"Failed to fetch CPU utilization. Status: {status}")
@@ -93,31 +65,27 @@ def fetch_cpu_utilization():
 def process_cpu_data(data):
     max_cpu_utilization = {}
 
-    for tsid, ts_data in data.get("data", {}).items():
-        metadata = ts_data.get("metadata", {})
-        cluster = metadata.get("kubernetes_cluster", "unknown")
-        pod = metadata.get("kubernetes_pod_name", "unknown")
-        
-        max_value = max(ts_data.get("values", [0]))
-        
-        if cluster not in max_cpu_utilization:
-            max_cpu_utilization[cluster] = {}
-        
-        if pod not in max_cpu_utilization[cluster] or max_value > max_cpu_utilization[cluster][pod]:
-            max_cpu_utilization[cluster][pod] = max_value
+    for line in data.split(b'\n'):
+        if line:
+            try:
+                message = json.loads(line)
+                if message['type'] == 'data':
+                    tsid = message['tsId']
+                    metadata = message['metadata']
+                    cluster = metadata.get('kubernetes_cluster', 'unknown')
+                    pod = metadata.get('kubernetes_pod_name', 'unknown')
+                    value = message['value']
+                    
+                    if cluster not in max_cpu_utilization:
+                        max_cpu_utilization[cluster] = {}
+                    if pod not in max_cpu_utilization[cluster] or value > max_cpu_utilization[cluster][pod]:
+                        max_cpu_utilization[cluster][pod] = value
+            except json.JSONDecodeError:
+                continue
 
     return max_cpu_utilization
 
 def main():
-    print("Fetching all metrics...")
-    all_metrics = get_all_metrics()
-    print(f"Total metrics available: {len(all_metrics)}")
-
-    if METRIC_NAME not in [m['name'] for m in all_metrics]:
-        print(f"Warning: '{METRIC_NAME}' not found in available metrics.")
-    else:
-        print(f"'{METRIC_NAME}' found in available metrics. Proceeding to fetch data.")
-
     print("\nFetching CPU utilization data for the last 90 days...")
     cpu_data = fetch_cpu_utilization()
 
