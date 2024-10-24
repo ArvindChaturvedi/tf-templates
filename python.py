@@ -45,7 +45,7 @@ data('container_cpu_utilization', filter=filter('kubernetes_cluster', '*'))
 """
 
 payload = {
-    "program": program_text,
+    "programText": program_text,
     "start": int(start_time.timestamp() * 1000),
     "end": int(end_time.timestamp() * 1000),
     "resolution": 60000,  # 1-minute resolution
