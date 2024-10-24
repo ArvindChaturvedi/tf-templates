@@ -69,6 +69,9 @@ except Exception as e:
     print(f"An error occurred: {e}")
 
 # 4. SignalFlow API Test
+import time  # Add this to your imports at the top of the file
+
+# Replace the SignalFlow API Test section with this:
 print("\n4. SignalFlow API Test")
 print("----------------------")
 
@@ -79,16 +82,47 @@ program_text = """
 data('cpu.utilization').publish()
 """
 
+current_time_ms = int(time.time() * 1000)
 payload = {
     "programText": program_text,
-    "start": int(urllib3.util.timeout.current_time() * 1000) - 900000,  # 15 minutes ago
-    "stop": int(urllib3.util.timeout.current_time() * 1000),  # now
+    "start": current_time_ms - 900000,  # 15 minutes ago
+    "stop": current_time_ms,  # now
     "resolution": 60000,
     "maxDelay": 0,
     "immediate": True
 }
 
 headers.update({"Content-Type": "application/json"})
+
+try:
+    response = https.request('POST', execute_url, 
+                             body=json.dumps(payload).encode('utf-8'),
+                             headers=headers)
+    print(f"SignalFlow Execute API Status: {response.status}")
+    if response.status == 200:
+        print("Successfully connected to SignalFlow Execute API")
+        data = json.loads(response.data.decode('utf-8'))
+        print(f"Response data: {json.dumps(data, indent=2)[:1000]}...")  # First 1000 characters
+    else:
+        print(f"Failed to connect. Response: {response.data.decode('utf-8')}")
+except Exception as e:
+    print(f"Failed to connect to SignalFlow Execute API: {e}")
+
+print("\n5. List Metrics Test")
+print("-------------------")
+
+list_metrics_url = f"{base_url}/v2/metric"
+
+try:
+    response = https.request('GET', list_metrics_url, headers=headers)
+    print(f"List Metrics API Status: {response.status}")
+    if response.status == 200:
+        data = json.loads(response.data.decode('utf-8'))
+        print(f"First few metrics: {data['results'][:5]}")
+    else:
+        print(f"Failed to list metrics. Response: {response.data.decode('utf-8')}")
+except Exception as e:
+    print(f"Failed to connect to List Metrics API: {e}")
 
 try:
     response = https.request('POST', execute_url, 
