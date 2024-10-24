@@ -1,11 +1,13 @@
 import urllib3
 import json
-import certifi
+import ssl
 from datetime import datetime, timedelta
 import os
 
-# Disable InsecureRequestWarning
-urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+# Create an SSL context that ignores certificate verification
+ssl_context = ssl.create_default_context()
+ssl_context.check_hostname = False
+ssl_context.verify_mode = ssl.CERT_NONE
 
 # Configuration
 REALM = "YOUR_REALM"  # Replace with your realm
@@ -18,8 +20,8 @@ METRIC_NAME = "sf_metric::container_cpu_utilization"
 
 # Set up HTTP client
 https = urllib3.PoolManager(
-    cert_reqs='CERT_NONE',  # Disable certificate verification
-    ca_certs=certifi.where()
+    ssl_version=ssl.PROTOCOL_TLS,
+    ssl_context=ssl_context
 )
 
 headers = {
