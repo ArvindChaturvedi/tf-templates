@@ -1,94 +1,161 @@
 # AWS Aurora PostgreSQL Terraform Modules
 
-This repository provides Terraform modules for creating and managing AWS Aurora PostgreSQL clusters with a scalable directory structure suitable for multiple application teams.
+This project provides a set of reusable Terraform modules for deploying and managing AWS Aurora PostgreSQL clusters, designed to serve multiple application teams with flexible infrastructure configurations.
 
-## Directory Structure
+## Project Structure
 
 ```
-├── examples/                  # Example implementations
-│   ├── basic/                 # Basic cluster configuration
-│   ├── custom_parameters/     # Example with custom DB parameters
-│   └── multi_team_setup/      # Multi-team infrastructure setup
-├── modules/                   # Reusable Terraform modules
-│   ├── aurora_postgresql/     # Core Aurora PostgreSQL module
-│   ├── networking/            # Network infrastructure module
-│   └── security/              # Security resources module
+├── examples/                   # Example implementations
+│   ├── basic/                  # Simple Aurora PostgreSQL deployment
+│   ├── custom_parameters/      # Deployment with custom DB parameters
+│   └── multi_team_setup/       # Setup for multiple application teams
+├── modules/                    # Core modules
+│   ├── aurora_postgresql/      # Aurora PostgreSQL cluster module
+│   ├── networking/             # Networking infrastructure module
+│   └── security/               # Security resources module
+├── .github/
+│   └── workflows/              # GitHub Actions workflows
+│       └── terraform.yml       # CI/CD pipeline for Terraform
+├── backend.tf                  # Terraform backend configuration
+├── locals.tf                   # Local variables
+├── main.tf                     # Root module configuration
+├── outputs.tf                  # Root module outputs
+├── provider.tf                 # AWS provider configuration
+├── terraform.tfvars.example    # Example variable values
+└── variables.tf                # Input variables
 ```
 
-## Modules
+## Core Modules
 
-### Aurora PostgreSQL Module
+### 1. Aurora PostgreSQL Module
 
-The `aurora_postgresql` module creates an Aurora PostgreSQL cluster with customizable parameters, backup settings, monitoring, and performance configurations.
+Creates an Aurora PostgreSQL cluster with associated resources like parameter groups, subnet groups, and instances.
 
-Key features:
-- Configurable instance count and instance class
-- Support for custom parameter groups
-- Encryption at rest
-- Monitoring and CloudWatch alarms
-- Customizable backup settings
-- IAM database authentication
-- Performance Insights
-- Serverless v2 scaling configuration
+**Features:**
+- Creates provisioned or Serverless V2 Aurora PostgreSQL clusters
+- Configurable instance types and counts
+- Parameter group customization
+- Enhanced monitoring and performance insights
+- CloudWatch alarms for key metrics
+- Backup configuration
+- Encryption using AWS KMS
 
-### Networking Module
+### 2. Networking Module
 
-The `networking` module creates the necessary network infrastructure for deploying PostgreSQL Aurora clusters, including VPC, subnets, and security groups.
+Creates or uses existing VPC infrastructure for the Aurora PostgreSQL clusters, including subnets, route tables, and security groups.
 
-Key features:
-- VPC with public and private subnets
-- Internet Gateway and NAT Gateway
-- Route tables for traffic management
-- Security groups for database access control
+**Features:**
+- VPC and subnet creation
+- Internet Gateway and NAT Gateway setup
+- Public and private subnets
+- Security groups for DB access
+- Support for using existing VPC and subnet infrastructure
 
-### Security Module
+### 3. Security Module
 
-The `security` module creates security-related resources for AWS Aurora PostgreSQL clusters.
+Creates security-related resources for Aurora PostgreSQL, such as KMS keys, IAM roles, and secrets.
 
-Key features:
-- KMS Key for encryption
-- IAM Roles for monitoring and database access
-- Secrets Manager for database credentials
-- SNS Topics for notifications
-- RDS Event Subscriptions
+**Features:**
+- KMS key for encryption
+- IAM role for enhanced monitoring
+- AWS Secrets Manager for database credentials
+- IAM authentication for database access
+- SNS topics for notifications
+- RDS event subscriptions
 
-## Examples
+## Example Implementations
 
-The repository includes several example configurations:
+### Basic Example
 
-1. **Basic Setup** - A simple Aurora PostgreSQL cluster with standard configuration
-2. **Custom Parameters** - Example with custom database parameters and settings
-3. **Multi-Team Setup** - Advanced configuration demonstrating how to set up infrastructure for multiple teams
-
-## Usage
-
-To use these modules, you'll need:
-- Terraform installed (version >= 1.0.0)
-- AWS credentials configured
-- Basic understanding of AWS VPC and RDS Aurora
-
-See the README files in each module directory for detailed usage instructions and the examples directory for implementation patterns.
-
-## Getting Started
-
-1. Clone this repository
-2. Navigate to one of the examples directories
-3. Copy `terraform.tfvars.example` to `terraform.tfvars` and modify as needed
-4. Run `terraform init`, `terraform plan`, and `terraform apply`
+A simple implementation with standard parameters - use this as a starting point for new deployments.
 
 ```bash
 cd examples/basic
-cp terraform.tfvars.example terraform.tfvars
-# Edit terraform.tfvars with your preferred settings
 terraform init
 terraform plan
 terraform apply
 ```
 
+### Custom Parameters Example
+
+An implementation with customized database parameters for specific workloads.
+
+```bash
+cd examples/custom_parameters
+terraform init
+terraform plan
+terraform apply
+```
+
+### Multi-Team Setup Example
+
+An advanced setup for supporting multiple application teams with shared infrastructure.
+
+```bash
+cd examples/multi_team_setup
+terraform init
+terraform plan
+terraform apply
+```
+
+## GitHub Actions CI/CD
+
+This project includes a GitHub Actions workflow that automates:
+
+1. Terraform validation and formatting checks
+2. Infrastructure plan generation
+3. PR comments with plan details
+4. Infrastructure deployment to multiple environments
+5. Slack notifications for deployment status
+
+The workflow supports:
+- Multiple environments (dev, staging, prod)
+- Manual or automated deployments
+- Workspace-based state management
+- S3 backend for state storage
+
+## Prerequisites
+
+- Terraform >= 1.0.0
+- AWS account with appropriate permissions
+- S3 bucket for Terraform state (configured in backend.tf)
+- DynamoDB table for state locking (configured in backend.tf)
+- GitHub repository secrets for AWS credentials or role ARN
+
+## Getting Started
+
+1. Clone this repository
+2. Choose an example implementation 
+3. Customize `terraform.tfvars` based on `terraform.tfvars.example`
+4. Initialize and apply Terraform:
+
+```bash
+terraform init \
+  -backend-config="bucket=your-state-bucket" \
+  -backend-config="key=your-state-path/terraform.tfstate" \
+  -backend-config="region=us-east-1" \
+  -backend-config="dynamodb_table=your-lock-table"
+
+terraform plan
+terraform apply
+```
+
+## Best Practices
+
+- Use workspace-based state management for different environments
+- Apply appropriate tagging for cost allocation
+- Use KMS encryption for all sensitive data
+- Set up enhanced monitoring for production environments
+- Configure CloudWatch alarms with appropriate thresholds
+- Use deletion protection in production environments
+- Implement proper IAM policies with least privilege
+
 ## Contributing
 
-Contributions to improve these modules are welcome. Please follow the standard fork and pull request workflow.
+1. Fork the repository
+2. Create a feature branch
+3. Submit a pull request with a clear description of changes
 
 ## License
 
-This project is licensed under the MIT License.
+This project is licensed under the MIT License - see the LICENSE file for details.

@@ -10,22 +10,22 @@ output "vpc_cidr_block" {
 
 output "public_subnets" {
   description = "List of IDs of public subnets"
-  value       = aws_subnet.public[*].id
+  value       = var.create_subnets ? aws_subnet.public[*].id : var.existing_public_subnet_ids
 }
 
 output "public_subnet_cidrs" {
   description = "List of CIDR blocks of public subnets"
-  value       = aws_subnet.public[*].cidr_block
+  value       = var.create_subnets ? aws_subnet.public[*].cidr_block : null
 }
 
 output "private_subnets" {
   description = "List of IDs of private subnets"
-  value       = aws_subnet.private[*].id
+  value       = var.create_subnets ? aws_subnet.private[*].id : var.existing_private_subnet_ids
 }
 
 output "private_subnet_cidrs" {
   description = "List of CIDR blocks of private subnets"
-  value       = aws_subnet.private[*].cidr_block
+  value       = var.create_subnets ? aws_subnet.private[*].cidr_block : null
 }
 
 output "nat_gateway_ids" {

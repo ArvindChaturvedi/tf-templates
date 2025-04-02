@@ -33,7 +33,7 @@ resource "aws_internet_gateway" "this" {
 
 # Public Subnets
 resource "aws_subnet" "public" {
-  count = var.create_vpc ? length(var.public_subnet_cidrs) : 0
+  count = var.create_vpc && var.create_subnets ? length(var.public_subnet_cidrs) : 0
 
   vpc_id                  = aws_vpc.this[0].id
   cidr_block              = var.public_subnet_cidrs[count.index]
@@ -51,7 +51,7 @@ resource "aws_subnet" "public" {
 
 # Private Subnets for Aurora DB
 resource "aws_subnet" "private" {
-  count = var.create_vpc ? length(var.private_subnet_cidrs) : 0
+  count = var.create_vpc && var.create_subnets ? length(var.private_subnet_cidrs) : 0
 
   vpc_id                  = aws_vpc.this[0].id
   cidr_block              = var.private_subnet_cidrs[count.index]

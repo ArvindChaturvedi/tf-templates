@@ -6,7 +6,7 @@ variable "name" {
 variable "create_vpc" {
   description = "Whether to create a VPC"
   type        = bool
-  default     = true
+  default     = false
 }
 
 variable "vpc_id" {
@@ -16,7 +16,7 @@ variable "vpc_id" {
 }
 
 variable "vpc_cidr" {
-  description = "CIDR block for the VPC"
+  description = "CIDR block for the VPC (only needed if create_vpc = true)"
   type        = string
   default     = "10.0.0.0/16"
 }
@@ -24,13 +24,13 @@ variable "vpc_cidr" {
 variable "create_igw" {
   description = "Whether to create an Internet Gateway"
   type        = bool
-  default     = true
+  default     = false
 }
 
 variable "create_nat_gateway" {
   description = "Whether to create NAT Gateways"
   type        = bool
-  default     = true
+  default     = false
 }
 
 variable "single_nat_gateway" {
@@ -40,20 +40,39 @@ variable "single_nat_gateway" {
 }
 
 variable "availability_zones" {
-  description = "A list of availability zones in the region"
+  description = "A list of availability zones in the region (only needed if creating subnets)"
   type        = list(string)
+  default     = []
+}
+
+variable "create_subnets" {
+  description = "Whether to create subnets"
+  type        = bool
+  default     = false
 }
 
 variable "public_subnet_cidrs" {
-  description = "CIDR blocks for the public subnets"
+  description = "CIDR blocks for the public subnets (only needed if create_subnets = true)"
   type        = list(string)
   default     = ["10.0.1.0/24", "10.0.2.0/24", "10.0.3.0/24"]
 }
 
 variable "private_subnet_cidrs" {
-  description = "CIDR blocks for the private subnets"
+  description = "CIDR blocks for the private subnets (only needed if create_subnets = true)"
   type        = list(string)
   default     = ["10.0.11.0/24", "10.0.12.0/24", "10.0.13.0/24"]
+}
+
+variable "existing_private_subnet_ids" {
+  description = "List of existing private subnet IDs to use (if not creating subnets)"
+  type        = list(string)
+  default     = []
+}
+
+variable "existing_public_subnet_ids" {
+  description = "List of existing public subnet IDs to use (if not creating subnets)"
+  type        = list(string)
+  default     = []
 }
 
 variable "create_security_group" {
