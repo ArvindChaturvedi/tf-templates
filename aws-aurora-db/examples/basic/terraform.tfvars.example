@@ -1,0 +1,28 @@
+region         = "us-east-1"
+name           = "postgres-basic"
+application_name = "example-app"
+environment    = "dev"
+
+vpc_cidr           = "10.0.0.0/16"
+az_count           = 3
+allowed_cidr_blocks = ["10.0.0.0/16", "192.168.0.0/24"]
+
+database_name  = "exampledb"
+master_username = "dbadmin"
+db_port        = 5432
+
+instance_count = 2
+instance_class = "db.t3.medium"
+
+backup_retention_period = 7
+monitoring_interval     = 60
+performance_insights_enabled = true
+create_cloudwatch_alarms    = true
+iam_database_authentication_enabled = false
+
+tags = {
+  Owner       = "DevOps"
+  Environment = "dev"
+  Terraform   = "true"
+  Project     = "Example"
+}
