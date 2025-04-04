@@ -1,0 +1,265 @@
+name: Terraform
+
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - 'config/**'
+      - '**.tf'
+      - '.github/workflows/terraform.yml'
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:
+    inputs:
+      team:
+        description: 'Team name (e.g., team-a)'
+        required: true
+      environment:
+        description: 'Environment (e.g., dev, staging, prod)'
+        required: true
+        default: 'dev'
+
+env:
+  AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+  AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+  AWS_REGION: ${{ secrets.AWS_REGION || 'us-east-1' }}
+  TF_VERSION: '1.3.0'
+
+jobs:
+  validate:
+    name: Validate
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v2
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+
+      - name: Terraform Format
+        run: terraform fmt -check -recursive
+
+      - name: Terraform Init
+        run: terraform init -backend=false
+
+      - name: Terraform Validate
+        run: terraform validate
+
+  plan:
+    name: Plan
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch'
+    needs: [validate]
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v2
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+
+      - name: Set team and environment from workflow dispatch
+        if: github.event_name == 'workflow_dispatch'
+        run: |
+          echo "TEAM=${{ github.event.inputs.team }}" >> $GITHUB_ENV
+          echo "ENVIRONMENT=${{ github.event.inputs.environment }}" >> $GITHUB_ENV
+
+      - name: Determine team and environment from PR
+        if: github.event_name == 'pull_request'
+        run: |
+          # Extract team and environment from modified files in PR
+          # For simplicity, just using default values here
+          echo "TEAM=team-a" >> $GITHUB_ENV
+          echo "ENVIRONMENT=dev" >> $GITHUB_ENV
+
+      - name: Verify configuration file exists
+        run: |
+          CONFIG_FILE="config/${{ env.TEAM }}/${{ env.ENVIRONMENT }}.tfvars.json"
+          if [ ! -f "$CONFIG_FILE" ]; then
+            CONFIG_FILE="config/${{ env.TEAM }}/${{ env.ENVIRONMENT }}/terraform.tfvars.json"
+          fi
+          
+          if [ ! -f "$CONFIG_FILE" ]; then
+            echo "Configuration file not found for ${{ env.TEAM }}/${{ env.ENVIRONMENT }}"
+            exit 1
+          fi
+          
+          echo "CONFIG_FILE=$CONFIG_FILE" >> $GITHUB_ENV
+
+      - name: Terraform Init
+        run: terraform init
+
+      - name: Create/Select Workspace
+        run: |
+          WORKSPACE="${{ env.TEAM }}-${{ env.ENVIRONMENT }}"
+          terraform workspace select $WORKSPACE || terraform workspace new $WORKSPACE
+
+      - name: Terraform Plan
+        run: terraform plan -var-file="${{ env.CONFIG_FILE }}" -out=tfplan
+
+      - name: Upload Plan Artifact
+        uses: actions/upload-artifact@v3
+        with:
+          name: terraform-plan-${{ env.TEAM }}-${{ env.ENVIRONMENT }}
+          path: tfplan
+          retention-days: 5
+
+  apply:
+    name: Apply
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main' || github.event_name == 'workflow_dispatch'
+    needs: [plan]
+    environment: ${{ github.event.inputs.environment || 'dev' }}
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v2
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+
+      - name: Download Plan
+        if: github.event_name == 'workflow_dispatch'
+        uses: actions/download-artifact@v3
+        with:
+          name: terraform-plan-${{ github.event.inputs.team }}-${{ github.event.inputs.environment }}
+
+      - name: Set team and environment
+        run: |
+          if [ "${{ github.event_name }}" == "workflow_dispatch" ]; then
+            echo "TEAM=${{ github.event.inputs.team }}" >> $GITHUB_ENV
+            echo "ENVIRONMENT=${{ github.event.inputs.environment }}" >> $GITHUB_ENV
+          else
+            # For automatic deploys on merge to main, use a specified default
+            echo "TEAM=team-a" >> $GITHUB_ENV
+            echo "ENVIRONMENT=dev" >> $GITHUB_ENV
+          fi
+
+      - name: Verify configuration file exists
+        run: |
+          CONFIG_FILE="config/${{ env.TEAM }}/${{ env.ENVIRONMENT }}.tfvars.json"
+          if [ ! -f "$CONFIG_FILE" ]; then
+            CONFIG_FILE="config/${{ env.TEAM }}/${{ env.ENVIRONMENT }}/terraform.tfvars.json"
+          fi
+          
+          if [ ! -f "$CONFIG_FILE" ]; then
+            echo "Configuration file not found for ${{ env.TEAM }}/${{ env.ENVIRONMENT }}"
+            exit 1
+          fi
+          
+          echo "CONFIG_FILE=$CONFIG_FILE" >> $GITHUB_ENV
+
+      - name: Terraform Init
+        run: terraform init
+
+      - name: Create/Select Workspace
+        run: |
+          WORKSPACE="${{ env.TEAM }}-${{ env.ENVIRONMENT }}"
+          terraform workspace select $WORKSPACE || terraform workspace new $WORKSPACE
+
+      - name: Terraform Apply from Plan
+        if: github.event_name == 'workflow_dispatch' && hashFiles('tfplan') != ''
+        run: terraform apply tfplan
+
+      - name: Terraform Plan and Apply
+        if: github.event_name != 'workflow_dispatch' || hashFiles('tfplan') == ''
+        run: |
+          terraform plan -var-file="${{ env.CONFIG_FILE }}" -out=tfplan
+          terraform apply tfplan
+
+      - name: Extract Outputs
+        id: outputs
+        run: |
+          # Check if Aurora DB was created
+          if terraform output -json | grep -q "db_cluster_endpoint"; then
+            echo "DB_ENDPOINT=$(terraform output -raw db_cluster_endpoint)" >> $GITHUB_ENV
+            echo "DB_PORT=$(terraform output -raw db_cluster_port)" >> $GITHUB_ENV
+          fi
+          
+          # Check if PGBouncer was created
+          if terraform output -json | grep -q "pgbouncer_load_balancer_dns"; then
+            echo "PGBOUNCER_ENDPOINT=$(terraform output -raw pgbouncer_load_balancer_dns)" >> $GITHUB_ENV
+          fi
+          
+          # Check if Lambda functions were created
+          if terraform output -json | grep -q "lambda_function_names"; then
+            echo "LAMBDAS=$(terraform output -json lambda_function_names)" >> $GITHUB_ENV
+          fi
+
+      - name: Create Deployment Summary
+        run: |
+          echo "## Deployment Complete" > $GITHUB_STEP_SUMMARY
+          echo "Team: ${{ env.TEAM }}" >> $GITHUB_STEP_SUMMARY
+          echo "Environment: ${{ env.ENVIRONMENT }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
+          # Add details about what was deployed
+          echo "### Resources Created" >> $GITHUB_STEP_SUMMARY
+          
+          if [ -n "${{ env.DB_ENDPOINT }}" ]; then
+            echo "- ✅ Aurora PostgreSQL DB" >> $GITHUB_STEP_SUMMARY
+            echo "  - Endpoint: ${{ env.DB_ENDPOINT }}" >> $GITHUB_STEP_SUMMARY
+            echo "  - Port: ${{ env.DB_PORT }}" >> $GITHUB_STEP_SUMMARY
+          fi
+          
+          if [ -n "${{ env.PGBOUNCER_ENDPOINT }}" ]; then
+            echo "- ✅ PGBouncer Connection Pooling" >> $GITHUB_STEP_SUMMARY
+            echo "  - Endpoint: ${{ env.PGBOUNCER_ENDPOINT }}" >> $GITHUB_STEP_SUMMARY
+          fi
+          
+          if [ -n "${{ env.LAMBDAS }}" ]; then
+            echo "- ✅ Lambda Functions" >> $GITHUB_STEP_SUMMARY
+            echo "  - Functions: ${{ env.LAMBDAS }}" >> $GITHUB_STEP_SUMMARY
+          fi
+
+      - name: Send Notification
+        if: always()
+        uses: slackapi/slack-github-action@v1.23.0
+        with:
+          payload: |
+            {
+              "text": "Terraform Deployment Status: ${{ job.status }}",
+              "blocks": [
+                {
+                  "type": "section",
+                  "text": {
+                    "type": "mrkdwn",
+                    "text": "*Terraform Deployment for ${{ env.TEAM }}/${{ env.ENVIRONMENT }}*: ${{ job.status }}"
+                  }
+                },
+                {
+                  "type": "divider"
+                },
+                {
+                  "type": "section",
+                  "fields": [
+                    {
+                      "type": "mrkdwn",
+                      "text": "*Team:*\n${{ env.TEAM }}"
+                    },
+                    {
+                      "type": "mrkdwn",
+                      "text": "*Environment:*\n${{ env.ENVIRONMENT }}"
+                    }
+                  ]
+                },
+                {
+                  "type": "section",
+                  "text": {
+                    "type": "mrkdwn",
+                    "text": "*Details:*\n<${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}|View Deployment Details>"
+                  }
+                }
+              ]
+            }
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+          SLACK_WEBHOOK_TYPE: INCOMING_WEBHOOK

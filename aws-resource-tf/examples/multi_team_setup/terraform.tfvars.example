@@ -1,0 +1,32 @@
+region       = "us-east-1"
+environment  = "dev"
+project_name = "multi-team-aurora"
+
+# Existing Network Infrastructure
+existing_vpc_id             = "vpc-0abc123def456789a"
+existing_private_subnet_ids = ["subnet-0123456789abcdef0", "subnet-0fedcba9876543210", "subnet-00112233445566778"]
+existing_public_subnet_ids  = ["subnet-abcdef0123456789a", "subnet-a9876543210fedcba", "subnet-8877665544332211"]
+
+# Database Configuration
+db_port                     = 5432
+monitoring_interval         = 60
+performance_insights_enabled = true
+create_cloudwatch_alarms    = true
+
+# Team 1 Configuration
+team1_application_name = "team1-app"
+team1_allowed_cidrs    = ["192.168.1.0/24"]
+team1_database_name    = "team1db"
+team1_master_username  = "team1admin"
+team1_instance_count   = 2
+team1_instance_class   = "db.t3.medium"
+team1_backup_retention_period = 7
+
+# Team 2 Configuration
+team2_application_name = "team2-app"
+team2_allowed_cidrs    = ["192.168.2.0/24"]
+team2_database_name    = "team2db"
+team2_master_username  = "team2admin"
+team2_instance_count   = 2
+team2_instance_class   = "db.t3.medium"
+team2_backup_retention_period = 7

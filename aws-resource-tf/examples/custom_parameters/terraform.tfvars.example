@@ -1,0 +1,93 @@
+region         = "us-east-1"
+name           = "postgres-custom"
+application_name = "custom-app"
+environment    = "dev"
+
+vpc_cidr           = "10.0.0.0/16"
+az_count           = 3
+allowed_cidr_blocks = ["10.0.0.0/16", "192.168.0.0/24"]
+
+database_name  = "customdb"
+master_username = "dbadmin"
+db_port        = 5432
+
+instance_count = 2
+instance_class = "db.r5.large"
+
+engine_version = "13.7"
+db_parameter_group_family = "aurora-postgresql13"
+
+cluster_parameters = [
+  {
+    name  = "rds.force_ssl"
+    value = "1"
+  },
+  {
+    name  = "shared_preload_libraries"
+    value = "pg_stat_statements,auto_explain"
+  },
+  {
+    name  = "log_statement"
+    value = "ddl"
+  },
+  {
+    name  = "log_min_duration_statement"
+    value = "1000"
+  },
+  {
+    name  = "track_activity_query_size"
+    value = "4096"
+    apply_method = "pending-reboot"
+  }
+]
+
+instance_parameters = [
+  {
+    name  = "log_statement"
+    value = "ddl"
+  },
+  {
+    name  = "log_min_duration_statement"
+    value = "1000"
+  },
+  {
+    name  = "auto_explain.log_min_duration"
+    value = "5000"
+  },
+  {
+    name  = "auto_explain.log_analyze"
+    value = "1"
+  },
+  {
+    name  = "log_rotation_age"
+    value = "1440"
+  }
+]
+
+backup_retention_period = 14
+preferred_backup_window = "03:00-04:00"
+preferred_maintenance_window = "sun:05:00-sun:06:00"
+
+monitoring_interval = 30
+performance_insights_enabled = true
+performance_insights_retention_period = 7
+
+cpu_utilization_threshold = 70
+freeable_memory_threshold = 128000000
+disk_queue_depth_threshold = 10
+
+iam_database_authentication_enabled = true
+enabled_cloudwatch_logs_exports = ["postgresql", "upgrade"]
+auto_minor_version_upgrade = true
+allow_major_version_upgrade = false
+deletion_protection = true
+
+create_custom_endpoints = true
+apply_immediately = false
+
+tags = {
+  Owner       = "DatabaseTeam"
+  Environment = "dev"
+  Terraform   = "true"
+  Project     = "CustomParameters"
+}
