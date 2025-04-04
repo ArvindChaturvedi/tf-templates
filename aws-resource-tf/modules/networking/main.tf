@@ -11,21 +11,26 @@ locals {
   # Process provided subnet IDs
   public_subnet_ids = var.public_subnet_ids
   private_subnet_ids = var.private_subnet_ids
+  
+  # Check if we're using dummy values (for planning only)
+  is_dummy_vpc = can(regex("^vpc-[0-9a-f]{8}$", var.vpc_id))
+  is_dummy_subnet = length(var.private_subnet_ids) > 0 ? can(regex("^subnet-[0-9a-f]{8}$", var.private_subnet_ids[0])) : false
 }
 
 # Data source to fetch the existing VPC details
 data "aws_vpc" "selected" {
-  id = local.vpc_id
+  count = local.is_dummy_vpc ? 0 : 1
+  id    = local.vpc_id
 }
 
 # Data source to fetch subnet information
 data "aws_subnet" "private" {
-  count = length(local.private_subnet_ids)
+  count = local.is_dummy_subnet ? 0 : length(local.private_subnet_ids)
   id    = local.private_subnet_ids[count.index]
 }
 
 data "aws_subnet" "public" {
-  count = length(local.public_subnet_ids)
+  count = local.is_dummy_subnet ? 0 : length(local.public_subnet_ids)
   id    = local.public_subnet_ids[count.index]
 }
 

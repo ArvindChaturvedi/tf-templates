@@ -5,24 +5,22 @@
 # Networking Outputs
 output "vpc_id" {
   description = "The ID of the VPC"
-  value       = var.create_networking ? module.networking[0].vpc_id : var.existing_vpc_id
+  value       = module.networking.vpc_id
 }
 
 output "private_subnet_ids" {
   description = "List of private subnet IDs"
-  value       = var.create_networking ? module.networking[0].private_subnets : var.existing_private_subnet_ids
+  value       = module.networking.private_subnet_ids
 }
 
 output "public_subnet_ids" {
   description = "List of public subnet IDs"
-  value       = var.create_networking ? module.networking[0].public_subnets : var.existing_public_subnet_ids
+  value       = module.networking.public_subnet_ids
 }
 
 output "db_security_group_id" {
   description = "Security group ID for the database"
-  value       = var.create_networking ? module.networking[0].db_security_group_id : (
-    length(var.existing_db_security_group_ids) > 0 ? var.existing_db_security_group_ids[0] : null
-  )
+  value       = length(module.networking.db_security_group_ids) > 0 ? module.networking.db_security_group_ids[0] : null
 }
 
 # Security Outputs
@@ -43,7 +41,7 @@ output "monitoring_role_arn" {
 
 output "db_credentials_secret_arn" {
   description = "The ARN of the database credentials secret"
-  value       = var.create_db_credentials_secret ? module.security.db_credentials_secret_arn : var.existing_db_credentials_secret_arn
+  value       = var.create_db_credentials_secret ? module.security.secret_arn : var.existing_db_credentials_secret_arn
 }
 
 output "sns_topic_arn" {
@@ -61,32 +59,32 @@ output "db_access_role_arn" {
 # Aurora DB Outputs
 output "db_cluster_id" {
   description = "The ID of the Aurora DB cluster"
-  value       = var.create_aurora_db ? module.aurora[0].cluster_id : null
+  value       = var.create_aurora_db ? module.aurora_db[0].cluster_id : null
 }
 
 output "db_cluster_arn" {
   description = "The ARN of the Aurora DB cluster"
-  value       = var.create_aurora_db ? module.aurora[0].cluster_arn : null
+  value       = var.create_aurora_db ? module.aurora_db[0].cluster_arn : null
 }
 
 output "db_cluster_endpoint" {
   description = "The endpoint of the Aurora DB cluster"
-  value       = var.create_aurora_db ? module.aurora[0].cluster_endpoint : var.existing_db_endpoint
+  value       = var.create_aurora_db ? module.aurora_db[0].cluster_endpoint : var.existing_db_endpoint
 }
 
 output "db_cluster_reader_endpoint" {
   description = "The reader endpoint of the Aurora DB cluster"
-  value       = var.create_aurora_db ? module.aurora[0].cluster_reader_endpoint : null
+  value       = var.create_aurora_db ? module.aurora_db[0].cluster_reader_endpoint : null
 }
 
 output "db_cluster_port" {
   description = "The port of the Aurora DB cluster"
-  value       = var.create_aurora_db ? module.aurora[0].cluster_port : var.db_port
+  value       = var.create_aurora_db ? module.aurora_db[0].cluster_port : var.db_port
 }
 
 output "db_instance_ids" {
   description = "List of Aurora DB instance IDs"
-  value       = var.create_aurora_db ? module.aurora[0].cluster_instances : null
+  value       = var.create_aurora_db ? module.aurora_db[0].instance_identifiers : null
 }
 
 # EKS Integration Outputs
@@ -114,12 +112,12 @@ output "acm_private_certificate_arn" {
 # WAF Outputs
 output "waf_web_acl_id" {
   description = "The ID of the WAF Web ACL"
-  value       = var.create_waf_configuration ? module.waf[0].web_acl_id : null
+  value       = var.create_waf_configuration ? module.waf_configuration[0].web_acl_id : null
 }
 
 output "waf_web_acl_arn" {
   description = "The ARN of the WAF Web ACL"
-  value       = var.create_waf_configuration ? module.waf[0].web_acl_arn : null
+  value       = var.create_waf_configuration ? module.waf_configuration[0].web_acl_arn : null
 }
 
 # PGBouncer Outputs
@@ -141,10 +139,10 @@ output "pgbouncer_asg_name" {
 # Lambda Functions Outputs
 output "lambda_function_arns" {
   description = "Map of Lambda function ARNs"
-  value       = var.create_lambda_functions && length(keys(var.lambda_functions)) > 0 ? module.lambda_functions[0].function_arns : null
+  value       = var.create_lambda_functions ? module.lambda_functions[0].function_arns : null
 }
 
 output "lambda_function_names" {
   description = "Map of Lambda function names"
-  value       = var.create_lambda_functions && length(keys(var.lambda_functions)) > 0 ? module.lambda_functions[0].function_names : null
+  value       = var.create_lambda_functions ? module.lambda_functions[0].function_names : null
 }

@@ -179,20 +179,9 @@ resource "aws_lambda_function" "function" {
   publish       = var.publish_versions
 
   # Choose between S3 and local deployment package
-  dynamic "s3_key" {
-    for_each = var.s3_bucket != "" ? [1] : []
-    content {
-      s3_bucket = var.s3_bucket
-      s3_key    = var.s3_key
-    }
-  }
-
-  dynamic "filename" {
-    for_each = var.filename != "" ? [1] : []
-    content {
-      filename = var.filename
-    }
-  }
+  s3_bucket = var.s3_bucket != "" ? var.s3_bucket : null
+  s3_key    = var.s3_bucket != "" ? var.s3_key : null
+  filename  = var.s3_bucket == "" ? var.filename : null
 
   # Environment variables
   environment {

@@ -78,15 +78,15 @@ variable "db_parameter_group_family" {
 }
 
 variable "cluster_parameters" {
-  description = "A list of cluster parameters to apply"
-  type        = list(map(string))
-  default     = []
+  description = "A map of cluster parameters to apply"
+  type        = map(string)
+  default     = {}
 }
 
 variable "instance_parameters" {
-  description = "A list of instance parameters to apply"
-  type        = list(map(string))
-  default     = []
+  description = "A map of instance parameters to apply"
+  type        = map(string)
+  default     = {}
 }
 
 variable "backup_retention_period" {

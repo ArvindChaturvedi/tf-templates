@@ -2,22 +2,10 @@
 # AWS Aurora PostgreSQL Terraform Module - Main Configuration
 ###########################################################################
 
-provider "aws" {
-  region = var.aws_region
-}
-
 # Local variables for naming and tagging consistency
 locals {
   # Standard naming prefix based on environment and project
   name_prefix = "${var.environment}-${var.project_name}"
-  
-  # Common tags to be applied to all resources
-  common_tags = {
-    Environment = var.environment
-    Project     = var.project_name
-    Owner       = var.owner
-    ManagedBy   = "terraform"
-  }
   
   # Merge common tags with any additional custom tags
   tags = merge(local.common_tags, var.additional_tags)
@@ -52,17 +40,13 @@ module "security" {
   
   # KMS Key Configuration
   create_kms_key = var.create_kms_key
-  existing_kms_key_arn = var.existing_kms_key_arn
   
   # Enhanced Monitoring Role
   create_monitoring_role = var.create_enhanced_monitoring_role
-  existing_monitoring_role_arn = var.existing_monitoring_role_arn
   
   # Secret Manager Configuration
   create_db_credentials_secret = var.create_db_credentials_secret
   generate_master_password = var.generate_master_password
-  existing_db_credentials_secret_arn = var.existing_db_credentials_secret_arn
-  existing_db_credentials_secret_name = var.existing_db_credentials_secret_name
   
   master_username = var.master_username
   master_password = var.master_password
@@ -70,7 +54,6 @@ module "security" {
   
   # SNS Topics for Alerting
   create_sns_topic = var.create_sns_topic
-  existing_sns_topic_arns = var.existing_sns_topic_arns
   
   # IAM Role for Database Access
   create_db_access_role = var.create_db_access_role
@@ -92,18 +75,17 @@ module "aurora_db" {
   
   # Network Configuration
   subnet_ids = module.networking.private_subnet_ids
-  vpc_id     = module.networking.vpc_id
-  vpc_security_group_ids = module.networking.db_security_group_ids
+  security_group_ids = module.networking.db_security_group_ids
+  availability_zones = var.availability_zones
   
   # Database Configuration
   database_name     = var.database_name
   master_username   = var.master_username
   master_password   = var.master_password
   port              = var.db_port
-  instance_count    = var.db_instance_count
-  instance_class    = var.db_instance_class
+  instance_count    = var.instance_count
+  instance_class    = var.instance_class
   engine_version    = var.db_engine_version
-  availability_zones = var.availability_zones
   
   db_parameter_group_family = var.db_parameter_group_family
   cluster_parameters = var.db_cluster_parameters
@@ -127,13 +109,10 @@ module "aurora_db" {
   deletion_protection   = var.deletion_protection
   apply_immediately     = var.apply_immediately
   skip_final_snapshot   = var.skip_final_snapshot
-  final_snapshot_identifier_prefix = var.final_snapshot_identifier_prefix
   
-  # Event Subscription
-  create_db_event_subscription = var.create_db_event_subscription
-  sns_topic_arn = var.create_sns_topic ? module.security.sns_topic_arn : (length(var.existing_sns_topic_arns) > 0 ? var.existing_sns_topic_arns[0] : "")
-  
-  db_credentials_secret_arn = var.create_db_credentials_secret ? module.security.db_credentials_secret_arn : var.existing_db_credentials_secret_arn
+  # CloudWatch Alarms
+  create_cloudwatch_alarms = var.create_cloudwatch_alarms
+  cloudwatch_alarm_actions = var.create_sns_topic ? [module.security.sns_topic_arn] : []
   
   tags = local.tags
 }
@@ -148,28 +127,30 @@ module "eks_integration" {
   
   name = "${local.name_prefix}-eks"
   
+  # Required arguments
+  vpc_id = module.networking.vpc_id
+  region = var.aws_region
+  db_security_group_id = module.networking.db_security_group_ids[0]
+  
   # Aurora DB Information
   db_endpoint     = var.create_aurora_db ? module.aurora_db[0].cluster_endpoint : var.existing_db_endpoint
   db_port         = var.db_port
   database_name   = var.database_name
-  master_username = var.master_username
+  db_credentials_secret_arn = var.create_db_credentials_secret ? module.security.db_credentials_secret_arn : var.existing_db_credentials_secret_arn
+  db_credentials_secret_name = var.create_db_credentials_secret ? module.security.db_credentials_secret_name : var.existing_db_credentials_secret_name
   
   # Secret Access Configuration
-  create_secrets_access = var.create_eks_secrets_access
-  db_credentials_secret_arn = var.create_db_credentials_secret ? module.security.db_credentials_secret_arn : var.existing_db_credentials_secret_arn
-  
-  # IRSA Configuration  
-  create_irsa_access = var.create_eks_irsa_access
-  eks_node_role_id  = var.eks_node_role_id
+  create_secrets_access_policy = var.create_eks_secrets_access
+  create_irsa_secrets_access_policy = var.create_eks_irsa_access
+  node_role_id  = var.eks_node_role_id
   
   # K8s Resource Configuration
   create_k8s_resources = var.create_eks_k8s_resources
-  eks_cluster_name     = var.eks_cluster_name
-  namespace            = var.eks_namespace
+  k8s_namespace = var.eks_namespace
   
   # Service Account
   create_service_account = var.create_eks_service_account
-  service_account_name   = var.eks_service_account_name
+  db_access_role_arn = var.create_db_access_role ? module.security.db_access_role_arn : ""
   
   tags = local.tags
 }
@@ -206,14 +187,13 @@ module "waf_configuration" {
   name = "${local.name_prefix}-waf"
   
   scope                        = var.waf_scope
-  enable_managed_rules         = var.enable_waf_managed_rules
+  enable_aws_managed_rules     = var.enable_waf_managed_rules
   enable_sql_injection_protection = var.enable_sql_injection_protection
   enable_rate_limiting         = var.enable_rate_limiting
   rate_limit                   = var.waf_rate_limit
   
   # Associate with load balancers if created
-  associate_with_pgbouncer_lb = var.create_pgbouncer && var.pgbouncer_create_lb
-  pgbouncer_lb_arn = var.create_pgbouncer && var.pgbouncer_create_lb ? module.pgbouncer[0].load_balancer_arn : ""
+  alb_arn = var.create_pgbouncer && var.pgbouncer_create_lb ? module.pgbouncer[0].load_balancer_arn : ""
   
   tags = local.tags
 }
@@ -231,22 +211,20 @@ module "pgbouncer" {
   # Network Configuration
   vpc_id              = module.networking.vpc_id
   subnet_ids          = module.networking.public_subnet_ids
-  availability_zones  = var.availability_zones
-  allowed_cidr_blocks = var.allowed_cidr_blocks
+  region              = var.aws_region
   
   # DB Connection Information
-  db_host       = var.create_aurora_db ? module.aurora_db[0].cluster_endpoint : var.existing_db_endpoint
-  db_port       = var.db_port
-  db_name       = var.database_name
-  db_user       = var.master_username
-  db_password   = var.create_db_credentials_secret ? module.security.master_password : var.master_password
+  db_endpoint         = var.create_aurora_db ? module.aurora_db[0].cluster_endpoint : var.existing_db_endpoint
+  db_port             = var.db_port
+  database_name       = var.database_name
+  db_username         = var.master_username
+  db_password         = var.create_db_credentials_secret ? module.security.master_password : var.master_password
   
   # EC2 Instance Configuration
-  instance_type      = var.pgbouncer_instance_type
-  ami_id             = var.pgbouncer_ami_id
-  min_capacity       = var.pgbouncer_min_capacity
-  max_capacity       = var.pgbouncer_max_capacity
-  desired_capacity   = var.pgbouncer_desired_capacity
+  instance_type       = var.pgbouncer_instance_type
+  desired_capacity    = var.pgbouncer_desired_capacity
+  min_size            = var.pgbouncer_min_capacity
+  max_size            = var.pgbouncer_max_capacity
   
   # PGBouncer Configuration
   pgbouncer_port            = var.pgbouncer_port
@@ -257,8 +235,7 @@ module "pgbouncer" {
   create_lb = var.pgbouncer_create_lb
   
   # Security Configuration 
-  use_https = var.create_acm_certificates && var.create_public_certificate
-  certificate_arn = var.create_acm_certificates && var.create_public_certificate ? module.acm_certificates[0].public_certificate_arn : ""
+  allowed_security_group_ids = module.networking.db_security_group_ids
   
   tags = local.tags
 }
@@ -273,19 +250,25 @@ module "lambda_functions" {
   
   name = "${local.name_prefix}-lambda"
   
+  # Required arguments
+  handler = "index.handler"
+  runtime = "nodejs14.x"
+  region  = var.aws_region
+  
   # VPC Configuration for Lambda functions that need VPC access
-  vpc_id              = module.networking.vpc_id
-  subnet_ids          = module.networking.private_subnet_ids
-  security_group_ids  = module.networking.db_security_group_ids
+  vpc_id = module.networking.vpc_id
+  vpc_subnet_ids = module.networking.private_subnet_ids
+  vpc_security_group_ids = module.networking.db_security_group_ids
   
   # DB Configuration for Lambda functions that need DB access
-  db_host       = var.create_aurora_db ? module.aurora_db[0].cluster_endpoint : var.existing_db_endpoint
-  db_port       = var.db_port
-  db_name       = var.database_name
-  db_secret_arn = var.create_db_credentials_secret ? module.security.db_credentials_secret_arn : var.existing_db_credentials_secret_arn
+  db_credentials_secret_arn = var.create_db_credentials_secret ? module.security.db_credentials_secret_arn : var.existing_db_credentials_secret_arn
   
-  # Lambda Functions Configuration
-  lambda_functions = var.lambda_functions
+  # Environment variables for DB connection
+  environment_variables = {
+    DB_HOST = var.create_aurora_db ? module.aurora_db[0].cluster_endpoint : var.existing_db_endpoint
+    DB_PORT = tostring(var.db_port)
+    DB_NAME = var.database_name
+  }
   
   tags = local.tags
 }

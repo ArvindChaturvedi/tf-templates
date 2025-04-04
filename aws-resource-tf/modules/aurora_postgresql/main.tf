@@ -62,9 +62,9 @@ resource "aws_rds_cluster_parameter_group" "this" {
   dynamic "parameter" {
     for_each = var.cluster_parameters
     content {
-      name         = parameter.value.name
-      value        = parameter.value.value
-      apply_method = lookup(parameter.value, "apply_method", "immediate")
+      name         = parameter.key
+      value        = parameter.value
+      apply_method = "immediate"
     }
   }
   
@@ -80,9 +80,9 @@ resource "aws_db_parameter_group" "this" {
   dynamic "parameter" {
     for_each = var.instance_parameters
     content {
-      name         = parameter.value.name
-      value        = parameter.value.value
-      apply_method = lookup(parameter.value, "apply_method", "immediate")
+      name         = parameter.key
+      value        = parameter.value
+      apply_method = "immediate"
     }
   }
   

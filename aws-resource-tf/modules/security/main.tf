@@ -123,9 +123,8 @@ data "aws_caller_identity" "current" {}
 resource "aws_iam_role" "enhanced_monitoring" {
   count = var.create_monitoring_role ? 1 : 0
 
-  name        = "${var.name}-monitoring-role"
-  description = "IAM role for RDS enhanced monitoring for ${var.name}"
-  
+  name = "${var.name}-monitoring-role"
+
   assume_role_policy = jsonencode({
     Version = "2012-10-17"
     Statement = [
@@ -135,11 +134,9 @@ resource "aws_iam_role" "enhanced_monitoring" {
         Principal = {
           Service = "monitoring.rds.amazonaws.com"
         }
-      },
+      }
     ]
   })
-
-  managed_policy_arns = ["arn:aws:iam::aws:policy/service-role/AmazonRDSEnhancedMonitoringRole"]
 
   tags = merge(
     var.tags,
@@ -147,6 +144,13 @@ resource "aws_iam_role" "enhanced_monitoring" {
       "Name" = "${var.name}-monitoring-role"
     },
   )
+}
+
+resource "aws_iam_role_policy_attachment" "enhanced_monitoring" {
+  count = var.create_monitoring_role ? 1 : 0
+
+  role       = aws_iam_role.enhanced_monitoring[0].name
+  policy_arn = "arn:aws:iam::aws:policy/service-role/AmazonRDSEnhancedMonitoringRole"
 }
 
 # Secret for Aurora PostgreSQL master credentials

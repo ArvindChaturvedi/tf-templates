@@ -1,6 +1,6 @@
 # Backend Configuration for Terraform State Management
 # This configuration supports both local state (for development) and remote S3 state (for production)
-
+/*
 terraform {
   # The backend configuration is defined in the GitHub Actions workflow
   # This allows for dynamic state paths based on team and environment
@@ -27,7 +27,7 @@ terraform {
     encrypt = true
   }
 }
-
+*/
 # Note on State Management:
 # 
 # This architecture uses Terraform workspaces combined with S3 backend paths

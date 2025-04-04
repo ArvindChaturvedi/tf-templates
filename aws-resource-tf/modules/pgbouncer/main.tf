@@ -167,6 +167,7 @@ resource "aws_launch_template" "pgbouncer" {
     db_username                = var.db_username
     db_password                = var.db_password
     custom_pg_params           = var.custom_pg_params
+    name                       = var.name
   }))
 
   tag_specifications {

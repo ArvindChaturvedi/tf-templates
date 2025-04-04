@@ -31,6 +31,61 @@ variable "additional_tags" {
   default     = {}
 }
 
+# Application-specific variables
+variable "application_name" {
+  description = "Name of the application, used for resource naming"
+  type        = string
+  default     = ""
+}
+
+variable "database_name" {
+  description = "Name of the database to create"
+  type        = string
+  default     = ""
+}
+
+variable "master_username" {
+  description = "Master username for the database"
+  type        = string
+  default     = "dbadmin"
+}
+
+variable "instance_count" {
+  description = "Number of database instances to create"
+  type        = number
+  default     = 2
+}
+
+variable "instance_class" {
+  description = "Instance class for the database instances"
+  type        = string
+  default     = "db.r5.large"
+}
+
+variable "allowed_cidrs" {
+  description = "List of CIDR blocks allowed to access the database"
+  type        = list(string)
+  default     = []
+}
+
+variable "db_cluster_parameters" {
+  description = "Cluster parameters for the database"
+  type        = map(string)
+  default     = {}
+}
+
+variable "db_instance_parameters" {
+  description = "Instance parameters for the database"
+  type        = map(string)
+  default     = {}
+}
+
+variable "create_cloudwatch_alarms" {
+  description = "Whether to create CloudWatch alarms for the database"
+  type        = bool
+  default     = false
+}
+
 ###########################################################################
 # Component Creation Flags - Control which modules get created
 ###########################################################################
@@ -240,18 +295,6 @@ variable "db_parameter_group_family" {
   description = "Family of the DB parameter group"
   type        = string
   default     = "aurora-postgresql14"
-}
-
-variable "db_cluster_parameters" {
-  description = "Map of cluster parameters to apply"
-  type        = map(string)
-  default     = {}
-}
-
-variable "db_instance_parameters" {
-  description = "Map of instance parameters to apply"
-  type        = map(string)
-  default     = {}
 }
 
 variable "backup_retention_period" {
@@ -554,4 +597,67 @@ variable "teams" {
     })), {})
   }))
   default = {}
+}
+
+variable "db_parameters" {
+  description = "Map of DB parameters to apply to the cluster"
+  type        = map(string)
+  default     = {}
+}
+
+variable "db_instance_class" {
+  description = "Instance class for the database instances"
+  type        = string
+  default     = "db.r5.large"
+}
+
+variable "db_deletion_protection" {
+  description = "Whether to enable deletion protection for the database"
+  type        = bool
+  default     = true
+}
+
+variable "application_teams" {
+  description = "List of application teams and their configurations"
+  type = list(object({
+    name            = string
+    application     = string
+    cost_center     = string
+    db_name         = string
+    instance_count  = number
+    instance_class  = optional(string)
+    parameters      = optional(map(string))
+  }))
+  default = []
+}
+
+variable "master_password" {
+  description = "Password for the master DB user"
+  type        = string
+  default     = ""
+  sensitive   = true
+}
+
+variable "create_networking" {
+  description = "Whether to create networking resources"
+  type        = bool
+  default     = false
+}
+
+variable "iam_database_authentication_enabled" {
+  description = "Whether to enable IAM database authentication"
+  type        = bool
+  default     = false
+}
+
+variable "eks_db_access_role_arn" {
+  description = "ARN of the IAM role for EKS to access the database"
+  type        = string
+  default     = ""
+}
+
+variable "existing_db_endpoint" {
+  description = "Endpoint of an existing Aurora DB cluster"
+  type        = string
+  default     = ""
 }

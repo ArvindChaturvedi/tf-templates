@@ -29,11 +29,11 @@ chown pgbouncer:pgbouncer /var/log/pgbouncer
 # Get DB credentials from Secrets Manager if enabled
 if [ "${use_secrets_manager}" = "true" ]; then
     SECRET_VALUE=$(aws secretsmanager get-secret-value --secret-id ${db_credentials_secret_arn} --region ${region} --query SecretString --output text)
-    DB_USERNAME=$(echo $SECRET_VALUE | jq -r '.username')
-    DB_PASSWORD=$(echo $SECRET_VALUE | jq -r '.password')
+    db_username=$(echo $SECRET_VALUE | jq -r '.username')
+    db_password=$(echo $SECRET_VALUE | jq -r '.password')
 else
-    DB_USERNAME="${db_username}"
-    DB_PASSWORD="${db_password}"
+    db_username="${db_username}"
+    db_password="${db_password}"
 fi
 
 # Configure pgbouncer.ini
@@ -73,10 +73,10 @@ ${custom_pg_params}
 EOF
 
 # Create userlist.txt with DB credentials
-PASSWORD_MD5=$(echo -n "md5$(echo -n "${DB_PASSWORD}${DB_USERNAME}" | md5sum | cut -d' ' -f1)")
+PASSWORD_MD5=$(echo -n "md5$(echo -n "${db_password}${db_username}" | md5sum | cut -d' ' -f1)")
 
 cat > /etc/pgbouncer/userlist.txt << EOF
-"${DB_USERNAME}" "${PASSWORD_MD5}"
+"${db_username}" "$${PASSWORD_MD5}"
 "pgbouncer" "md5$(echo -n 'pgbouncerpgbouncer' | md5sum | cut -d' ' -f1)"
 EOF
 
@@ -163,7 +163,7 @@ cat > /opt/aws/amazon-cloudwatch-agent/etc/amazon-cloudwatch-agent.json << EOF
       }
     },
     "append_dimensions": {
-      "InstanceId": "\${aws:InstanceId}"
+      "InstanceId": "$${aws:InstanceId}"
     }
   }
 }
