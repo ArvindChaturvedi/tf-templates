@@ -262,3 +262,42 @@ module "team2_event_subscription" {
     Team  = "team2"
   })
 }
+
+module "team_aurora" {
+  source = "../../modules/aurora_postgresql"
+  
+  for_each = var.teams
+  
+  name             = "${var.environment}-${each.key}-postgres"
+  application_name = each.value.application_name
+  environment      = var.environment
+  
+  subnet_ids         = var.existing_private_subnet_ids
+  security_group_ids = [module.team_security[each.key].db_security_group_id]
+  
+  database_name        = each.value.database_name
+  master_username      = each.value.master_username
+  master_password      = module.team_security[each.key].master_password
+  
+  instance_count = each.value.instance_count
+  instance_class = each.value.instance_class
+  
+  # ... other parameters ...
+  
+  tags = merge(local.common_tags, {
+    Name = "${var.environment}-${each.key}-postgres"
+    Team = each.key
+  })
+}
+
+variable "teams" {
+  type = map(object({
+    application_name    = string
+    database_name      = string
+    master_username    = string
+    instance_count     = number
+    instance_class     = string
+    allowed_cidrs      = list(string)
+    # ... other team-specific parameters ...
+  }))
+}

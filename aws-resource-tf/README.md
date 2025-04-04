@@ -16,6 +16,7 @@ This repository provides a flexible framework for deploying AWS infrastructure u
 - **Security**: WAF configurations, ACM certificates, encryption and audit logging
 - **Automation**: Lambda functions for database operations and maintenance
 - **Team Separation**: Isolated infrastructure for multiple application teams
+- **DRY Configuration**: Reusable modules with team-specific settings
 
 ## Architecture
 
@@ -76,8 +77,47 @@ module "aurora" {
 
 For multi-team infrastructure, define your configuration in team-specific JSON files:
 
-1. Edit the configuration file for your team: `config/team-a/dev.tfvars.json`
-2. Deploy using the GitHub Actions workflow with team and environment parameters
+1. Create a directory for your team in the `teams` directory:
+   ```bash
+   mkdir -p teams/your-team-name
+   ```
+
+2. Create a `terraform.tfvars.json` file in your team directory with your team-specific settings:
+   ```json
+   {
+     "application_name": "your-team-app",
+     "database_name": "your-team-db",
+     "master_username": "your-team-admin",
+     "instance_count": 2,
+     "instance_class": "db.r5.large",
+     "allowed_cidrs": ["10.0.0.0/16"],
+     "backup_retention_period": 7,
+     "performance_insights_enabled": true,
+     "performance_insights_retention_period": 7,
+     "monitoring_interval": 60,
+     "db_cluster_parameters": {
+       "log_statement": "all",
+       "log_min_duration_statement": "1000"
+     },
+     "db_instance_parameters": {
+       "work_mem": "16MB",
+       "maintenance_work_mem": "1GB"
+     },
+     "create_cloudwatch_alarms": true,
+     "create_sns_topic": true,
+     "create_db_credentials_secret": true,
+     "generate_master_password": true,
+     "create_db_event_subscription": true,
+     "create_db_access_role": true,
+     "create_eks_integration": false,
+     "create_pgbouncer": false
+   }
+   ```
+
+3. Use the `apply-team-config.sh` script to apply your team's configuration:
+   ```bash
+   ./apply-team-config.sh your-team-name dev true
+   ```
 
 ### Conditional Module Creation
 
@@ -201,6 +241,23 @@ This solution provides team isolation through:
 - Distinct resource naming
 - IAM-based access control
 - Workflow separation
+
+### Team-Specific Configuration
+
+The repository includes a structure for team-specific configurations:
+
+```
+teams/
+├── team-a/
+│   └── terraform.tfvars.json
+├── team-b/
+│   └── terraform.tfvars.json
+└── README.md
+```
+
+Each team can have its own configuration file with team-specific settings. The `apply-team-config.sh` script combines the global settings with the team-specific settings and applies them.
+
+For more details on team-specific configurations, see the [teams/README.md](teams/README.md) file.
 
 ## Deployment Pipeline
 

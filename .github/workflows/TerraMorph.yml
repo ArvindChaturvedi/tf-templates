@@ -1,4 +1,4 @@
-name: Terraform
+name: TerraMorph
 
 on:
   push:
@@ -80,9 +80,9 @@ jobs:
 
       - name: Verify configuration file exists
         run: |
-          CONFIG_FILE="config/${{ env.TEAM }}/${{ env.ENVIRONMENT }}.tfvars.json"
+          CONFIG_FILE="aws-resource-tf/config/${{ env.TEAM }}/${{ env.ENVIRONMENT }}.tfvars.json"
           if [ ! -f "$CONFIG_FILE" ]; then
-            CONFIG_FILE="config/${{ env.TEAM }}/${{ env.ENVIRONMENT }}/terraform.tfvars.json"
+            CONFIG_FILE="aws-resource-tf/config/${{ env.TEAM }}/${{ env.ENVIRONMENT }}/terraform.tfvars.json"
           fi
           
           if [ ! -f "$CONFIG_FILE" ]; then

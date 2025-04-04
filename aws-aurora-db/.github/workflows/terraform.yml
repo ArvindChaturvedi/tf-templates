@@ -8,6 +8,7 @@ on:
     paths:
       - '**/*.tf'
       - '.github/workflows/terraform.yml'
+      - 'teams/**/*.json'
   pull_request:
     branches:
       - main
@@ -15,8 +16,13 @@ on:
     paths:
       - '**/*.tf'
       - '.github/workflows/terraform.yml'
+      - 'teams/**/*.json'
   workflow_dispatch:
     inputs:
+      team_name:
+        description: 'Team name to deploy (e.g., team-a)'
+        required: false
+        type: string
       environment:
         description: 'Environment to deploy to'
         required: true
@@ -45,13 +51,56 @@ env:
   TF_WORKSPACE: ${{ github.event.inputs.environment || 'dev' }}
   # This is used to conditionally apply terraform based on workspace
   APPLY_TERRAFORM: ${{ github.event.inputs.apply == 'true' || github.ref == 'refs/heads/main' && github.event_name == 'push' }}
-  # Determine which example environment to deploy
-  TF_EXAMPLE_DIR: ${{ vars.TF_EXAMPLE_DIR || 'examples/basic' }}
+  # Team name from workflow dispatch or detected from changed files
+  TEAM_NAME: ${{ github.event.inputs.team_name || '' }}
 
 jobs:
+  detect-team:
+    name: "Detect Team"
+    runs-on: ubuntu-latest
+    outputs:
+      team_name: ${{ steps.set-team.outputs.team_name }}
+      team_detected: ${{ steps.set-team.outputs.team_detected }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+        with:
+          fetch-depth: 0
+
+      - name: Detect team from changed files
+        id: set-team
+        run: |
+          if [[ "${{ env.TEAM_NAME }}" != "" ]]; then
+            echo "team_name=${{ env.TEAM_NAME }}" >> $GITHUB_OUTPUT
+            echo "team_detected=true" >> $GITHUB_OUTPUT
+          else
+            # Get changed files in the PR or push
+            if [[ "${{ github.event_name }}" == "pull_request" ]]; then
+              CHANGED_FILES=$(git diff --name-only ${{ github.event.pull_request.base.sha }} ${{ github.event.pull_request.head.sha }})
+            else
+              CHANGED_FILES=$(git diff --name-only ${{ github.event.before }} ${{ github.event.after }})
+            fi
+            
+            # Look for team tfvars files
+            TEAM_FILE=$(echo "$CHANGED_FILES" | grep -E '^teams/[^/]+/terraform\.tfvars\.json$' | head -n 1)
+            
+            if [[ -n "$TEAM_FILE" ]]; then
+              TEAM_NAME=$(echo "$TEAM_FILE" | sed -E 's|^teams/([^/]+)/terraform\.tfvars\.json$|\1|')
+              echo "team_name=$TEAM_NAME" >> $GITHUB_OUTPUT
+              echo "team_detected=true" >> $GITHUB_OUTPUT
+            else
+              echo "team_name=" >> $GITHUB_OUTPUT
+              echo "team_detected=false" >> $GITHUB_OUTPUT
+            fi
+          fi
+          
+          echo "Detected team: ${{ steps.set-team.outputs.team_name }}"
+
   terraform-validate:
     name: "Validate"
     runs-on: ubuntu-latest
+    needs: detect-team
+    if: needs.detect-team.outputs.team_detected == 'true'
     
     steps:
       - name: Checkout code
@@ -78,10 +127,24 @@ jobs:
             cd ../../
           done
 
+      - name: Validate team configuration
+        run: |
+          TEAM_NAME="${{ needs.detect-team.outputs.team_name }}"
+          if [[ -f "teams/$TEAM_NAME/terraform.tfvars.json" ]]; then
+            echo "Validating team configuration for $TEAM_NAME..."
+            # Check if the file is valid JSON
+            jq . "teams/$TEAM_NAME/terraform.tfvars.json" > /dev/null
+            echo "Team configuration is valid JSON"
+          else
+            echo "Team configuration file not found: teams/$TEAM_NAME/terraform.tfvars.json"
+            exit 1
+          fi
+
   terraform-plan:
     name: "Plan"
     runs-on: ubuntu-latest
-    needs: terraform-validate
+    needs: [detect-team, terraform-validate]
+    if: needs.detect-team.outputs.team_detected == 'true'
     
     steps:
       - name: Checkout code
@@ -103,9 +166,11 @@ jobs:
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID || '' }}
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY || '' }}
 
+      - name: Make apply-team-config.sh executable
+        run: chmod +x apply-team-config.sh
+
       - name: Terraform Init
         id: init
-        working-directory: ${{ env.TF_EXAMPLE_DIR }}
         run: |
           terraform init \
             -backend-config="bucket=${{ secrets.TF_STATE_BUCKET || 'aurora-postgresql-terraform-state' }}" \
@@ -116,20 +181,28 @@ jobs:
 
       - name: Terraform Workspace
         id: workspace
-        working-directory: ${{ env.TF_EXAMPLE_DIR }}
         run: |
           terraform workspace select ${{ env.TF_WORKSPACE }} || terraform workspace new ${{ env.TF_WORKSPACE }}
           echo "Using workspace: ${{ env.TF_WORKSPACE }}"
 
       - name: Terraform Validate
         id: validate
-        working-directory: ${{ env.TF_EXAMPLE_DIR }}
         run: terraform validate -no-color
 
-      - name: Terraform Plan
+      - name: Terraform Plan for Team
         id: plan
-        working-directory: ${{ env.TF_EXAMPLE_DIR }}
-        run: terraform plan -no-color -input=false -out=tfplan
+        run: |
+          TEAM_NAME="${{ needs.detect-team.outputs.team_name }}"
+          echo "Planning Terraform for team $TEAM_NAME in ${{ env.TF_WORKSPACE }} environment..."
+          
+          # Create a temporary tfvars file that includes both global and team-specific settings
+          jq -s '.[0] * {teams: {}} | .teams[.teams | keys[0]] = .[1]' terraform.tfvars.json "teams/$TEAM_NAME/terraform.tfvars.json" > "terraform.$TEAM_NAME.tfvars.json"
+          
+          # Run terraform plan with the combined tfvars file
+          terraform plan -no-color -input=false -var-file="terraform.$TEAM_NAME.tfvars.json" -out=tfplan
+          
+          # Clean up
+          rm -f "terraform.$TEAM_NAME.tfvars.json"
         continue-on-error: false
 
       # Save the plan as an artifact for the apply job
@@ -137,7 +210,7 @@ jobs:
         uses: actions/upload-artifact@v3
         with:
           name: terraform-plan
-          path: ${{ env.TF_EXAMPLE_DIR }}/tfplan
+          path: tfplan
           retention-days: 5
 
       # Add a comment to the PR with the plan output
@@ -146,15 +219,15 @@ jobs:
         if: github.event_name == 'pull_request'
         env:
           PLAN: "terraform\n${{ steps.plan.outputs.stdout }}"
+          TEAM_NAME: "${{ needs.detect-team.outputs.team_name }}"
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           script: |
             const output = `#### Terraform Format and Style 🖌\`${{ steps.fmt.outcome }}\`
             #### Terraform Initialization ⚙️\`${{ steps.init.outcome }}\`
             #### Terraform Validation 🤖\`${{ steps.validate.outcome }}\`
-            #### Terraform Plan 📖\`${{ steps.plan.outcome }}\`
+            #### Terraform Plan for Team \`${process.env.TEAM_NAME}\` 📖\`${{ steps.plan.outcome }}\`
             #### Workspace: \`${{ env.TF_WORKSPACE }}\`
-            #### Directory: \`${{ env.TF_EXAMPLE_DIR }}\`
 
             <details><summary>Show Plan</summary>
 
@@ -176,10 +249,11 @@ jobs:
   terraform-apply:
     name: "Apply"
     runs-on: ubuntu-latest
-    needs: terraform-plan
+    needs: [detect-team, terraform-plan]
     # Only run apply if the plan was successful and we're in the right conditions
     if: |
       success() && 
+      needs.detect-team.outputs.team_detected == 'true' &&
       (github.event_name == 'workflow_dispatch' && github.event.inputs.apply == 'true') || 
       (github.ref == 'refs/heads/main' && github.event_name == 'push')
     
@@ -205,8 +279,10 @@ jobs:
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID || '' }}
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY || '' }}
 
+      - name: Make apply-team-config.sh executable
+        run: chmod +x apply-team-config.sh
+
       - name: Terraform Init
-        working-directory: ${{ env.TF_EXAMPLE_DIR }}
         run: |
           terraform init \
             -backend-config="bucket=${{ secrets.TF_STATE_BUCKET || 'aurora-postgresql-terraform-state' }}" \
@@ -216,7 +292,6 @@ jobs:
             -backend-config="dynamodb_table=${{ secrets.TF_LOCK_TABLE || 'aurora-postgresql-terraform-locks' }}"
 
       - name: Terraform Workspace
-        working-directory: ${{ env.TF_EXAMPLE_DIR }}
         run: |
           terraform workspace select ${{ env.TF_WORKSPACE }} || terraform workspace new ${{ env.TF_WORKSPACE }}
           echo "Using workspace: ${{ env.TF_WORKSPACE }}"
@@ -226,29 +301,42 @@ jobs:
         uses: actions/download-artifact@v3
         with:
           name: terraform-plan
-          path: ${{ env.TF_EXAMPLE_DIR }}
+          path: .
 
-      - name: Terraform Apply
-        working-directory: ${{ env.TF_EXAMPLE_DIR }}
-        run: terraform apply -auto-approve tfplan
+      - name: Apply Team Configuration
+        run: |
+          TEAM_NAME="${{ needs.detect-team.outputs.team_name }}"
+          echo "Applying Terraform for team $TEAM_NAME in ${{ env.TF_WORKSPACE }} environment..."
+          
+          # Create a temporary tfvars file that includes both global and team-specific settings
+          jq -s '.[0] * {teams: {}} | .teams[.teams | keys[0]] = .[1]' terraform.tfvars.json "teams/$TEAM_NAME/terraform.tfvars.json" > "terraform.$TEAM_NAME.tfvars.json"
+          
+          # Apply the plan
+          terraform apply -auto-approve tfplan
+          
+          # Clean up
+          rm -f "terraform.$TEAM_NAME.tfvars.json"
 
   notify:
     name: "Notification"
     runs-on: ubuntu-latest
-    needs: [terraform-validate, terraform-plan, terraform-apply]
+    needs: [detect-team, terraform-validate, terraform-plan, terraform-apply]
     if: always()
     steps:
       - name: Determine job status
         id: check
         run: |
-          if [[ ${{ needs.terraform-apply.result }} == 'success' ]]; then
-            echo "message=:white_check_mark: Terraform successfully applied to ${{ env.TF_WORKSPACE }}" >> $GITHUB_OUTPUT
+          if [[ "${{ needs.detect-team.outputs.team_detected }}" != "true" ]]; then
+            echo "message=:information_source: No team configuration changes detected" >> $GITHUB_OUTPUT
+            echo "color=good" >> $GITHUB_OUTPUT
+          elif [[ ${{ needs.terraform-apply.result }} == 'success' ]]; then
+            echo "message=:white_check_mark: Terraform successfully applied for team ${{ needs.detect-team.outputs.team_name }} in ${{ env.TF_WORKSPACE }}" >> $GITHUB_OUTPUT
             echo "color=good" >> $GITHUB_OUTPUT
           elif [[ ${{ needs.terraform-apply.result }} == 'skipped' && ${{ needs.terraform-plan.result }} == 'success' ]]; then
-            echo "message=:heavy_check_mark: Terraform plan successful, changes not applied" >> $GITHUB_OUTPUT
+            echo "message=:heavy_check_mark: Terraform plan successful for team ${{ needs.detect-team.outputs.team_name }} in ${{ env.TF_WORKSPACE }}, changes not applied" >> $GITHUB_OUTPUT
             echo "color=warning" >> $GITHUB_OUTPUT
           else
-            echo "message=:x: Terraform workflow failed for ${{ env.TF_WORKSPACE }}" >> $GITHUB_OUTPUT
+            echo "message=:x: Terraform workflow failed for team ${{ needs.detect-team.outputs.team_name }} in ${{ env.TF_WORKSPACE }}" >> $GITHUB_OUTPUT
             echo "color=danger" >> $GITHUB_OUTPUT
           fi
 
@@ -267,6 +355,11 @@ jobs:
                     {
                       "title": "Repository",
                       "value": "${{ github.repository }}",
+                      "short": true
+                    },
+                    {
+                      "title": "Team",
+                      "value": "${{ needs.detect-team.outputs.team_name }}",
                       "short": true
                     },
                     {

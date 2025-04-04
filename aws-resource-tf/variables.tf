@@ -35,12 +35,6 @@ variable "additional_tags" {
 # Component Creation Flags - Control which modules get created
 ###########################################################################
 
-variable "create_networking" {
-  description = "DEPRECATED: VPC creation is no longer supported. Please provide existing VPC and subnet IDs."
-  type        = bool
-  default     = false
-}
-
 variable "create_aurora_db" {
   description = "Whether to create the Aurora PostgreSQL database cluster"
   type        = bool
@@ -154,6 +148,7 @@ variable "create_lambda_functions" {
   type        = bool
   default     = false
 }
+
 ###########################################################################
 # Network Configuration - Required existing resources
 ###########################################################################
@@ -190,6 +185,7 @@ variable "allowed_cidr_blocks" {
   type        = list(string)
   default     = ["10.0.0.0/16"]
 }
+
 ###########################################################################
 # Security Configuration
 ###########################################################################
@@ -225,74 +221,37 @@ variable "existing_sns_topic_arns" {
 }
 
 ###########################################################################
-# Aurora DB Configuration
+# Aurora DB Configuration - Default values for all teams
 ###########################################################################
 
-variable "database_name" {
-  description = "Name of the database to create"
-  type        = string
-  default     = "appdb"
-}
-
-variable "master_username" {
-  description = "Username for the master DB user"
-  type        = string
-  default     = "dbadmin"
-}
-
-variable "master_password" {
-  description = "Password for the master DB user (if not generating a random one)"
-  type        = string
-  default     = ""
-  sensitive   = true
-}
-
-variable "existing_db_endpoint" {
-  description = "Endpoint of an existing database (if not creating Aurora)"
-  type        = string
-  default     = ""
-}
-
 variable "db_port" {
-  description = "Port on which the DB accepts connections"
+  description = "Port for the database"
   type        = number
   default     = 5432
 }
 
-variable "db_instance_count" {
-  description = "Number of DB instances to create in the cluster"
-  type        = number
-  default     = 2
-}
-
-variable "db_instance_class" {
-  description = "Instance type to use for the DB instances"
-  type        = string
-  default     = "db.r5.large"
-}
-
 variable "db_engine_version" {
-  description = "Aurora PostgreSQL engine version"
+  description = "Version of the PostgreSQL engine"
   type        = string
   default     = "14.6"
 }
 
 variable "db_parameter_group_family" {
-  description = "DB parameter group family"
+  description = "Family of the DB parameter group"
   type        = string
   default     = "aurora-postgresql14"
 }
 
 variable "db_cluster_parameters" {
-  description = "List of DB cluster parameters to apply"
-  type        = list(map(string))
-  default     = []
+  description = "Map of cluster parameters to apply"
+  type        = map(string)
+  default     = {}
 }
 
 variable "db_instance_parameters" {
-  description = "List of DB instance parameters to apply"
-  type        = list(map(string))
-  default     = []
+  description = "Map of instance parameters to apply"
+  type        = map(string)
+  default     = {}
 }
 
 variable "backup_retention_period" {
@@ -302,43 +261,43 @@ variable "backup_retention_period" {
 }
 
 variable "preferred_backup_window" {
-  description = "The daily time range during which backups are created"
+  description = "Preferred window for automated backups"
   type        = string
   default     = "02:00-03:00"
 }
 
 variable "preferred_maintenance_window" {
-  description = "The weekly time range during which maintenance can occur"
+  description = "Preferred window for maintenance"
   type        = string
   default     = "sun:05:00-sun:06:00"
 }
 
 variable "auto_minor_version_upgrade" {
-  description = "Whether to automatically upgrade minor engine versions"
+  description = "Whether to enable auto minor version upgrades"
   type        = bool
   default     = true
 }
 
 variable "storage_encrypted" {
-  description = "Whether to encrypt the database storage"
+  description = "Whether to encrypt storage"
   type        = bool
   default     = true
 }
 
 variable "monitoring_interval" {
-  description = "The interval, in seconds, between points when Enhanced Monitoring metrics are collected"
+  description = "Interval in seconds for enhanced monitoring"
   type        = number
   default     = 60
 }
 
 variable "performance_insights_enabled" {
-  description = "Whether to enable Performance Insights"
+  description = "Whether to enable performance insights"
   type        = bool
   default     = true
 }
 
 variable "performance_insights_retention_period" {
-  description = "The retention period for Performance Insights, in days"
+  description = "Retention period for performance insights in days"
   type        = number
   default     = 7
 }
@@ -350,19 +309,19 @@ variable "deletion_protection" {
 }
 
 variable "apply_immediately" {
-  description = "Whether to apply changes immediately or during the next maintenance window"
+  description = "Whether to apply changes immediately"
   type        = bool
   default     = false
 }
 
 variable "skip_final_snapshot" {
-  description = "Whether to skip the final snapshot when the cluster is deleted"
+  description = "Whether to skip final snapshot when deleting the cluster"
   type        = bool
   default     = false
 }
 
 variable "final_snapshot_identifier_prefix" {
-  description = "Prefix for the name of the final snapshot"
+  description = "Prefix for the final snapshot identifier"
   type        = string
   default     = "final"
 }
@@ -372,7 +331,7 @@ variable "final_snapshot_identifier_prefix" {
 ###########################################################################
 
 variable "eks_cluster_name" {
-  description = "Name of the EKS cluster to integrate with"
+  description = "Name of the EKS cluster"
   type        = string
   default     = ""
 }
@@ -384,13 +343,13 @@ variable "eks_namespace" {
 }
 
 variable "eks_node_role_id" {
-  description = "Role ID of the EKS node IAM role"
+  description = "ID of the EKS node role"
   type        = string
   default     = ""
 }
 
 variable "eks_service_account_name" {
-  description = "Name of the Kubernetes service account to create"
+  description = "Name of the Kubernetes service account"
   type        = string
   default     = "db-access"
 }
@@ -400,25 +359,25 @@ variable "eks_service_account_name" {
 ###########################################################################
 
 variable "domain_name" {
-  description = "Domain name for the ACM certificate"
+  description = "Domain name for the certificate"
   type        = string
   default     = ""
 }
 
 variable "subject_alternative_names" {
-  description = "Subject alternative names for the ACM certificate"
+  description = "Subject alternative names for the certificate"
   type        = list(string)
   default     = []
 }
 
 variable "auto_validate_certificate" {
-  description = "Whether to automatically validate the certificate with Route 53"
+  description = "Whether to automatically validate the certificate"
   type        = bool
   default     = true
 }
 
 variable "route53_zone_name" {
-  description = "Route 53 zone name to use for certificate validation"
+  description = "Name of the Route53 zone for DNS validation"
   type        = string
   default     = ""
 }
@@ -428,13 +387,13 @@ variable "route53_zone_name" {
 ###########################################################################
 
 variable "waf_scope" {
-  description = "Scope of WAF (REGIONAL or CLOUDFRONT)"
+  description = "Scope of the WAF configuration"
   type        = string
   default     = "REGIONAL"
 }
 
 variable "enable_waf_managed_rules" {
-  description = "Whether to enable AWS managed rule sets"
+  description = "Whether to enable WAF managed rules"
   type        = bool
   default     = true
 }
@@ -452,7 +411,7 @@ variable "enable_rate_limiting" {
 }
 
 variable "waf_rate_limit" {
-  description = "Maximum number of requests allowed in a 5-minute period"
+  description = "Rate limit for WAF"
   type        = number
   default     = 2000
 }
@@ -462,49 +421,49 @@ variable "waf_rate_limit" {
 ###########################################################################
 
 variable "pgbouncer_instance_type" {
-  description = "EC2 instance type for PGBouncer"
+  description = "Instance type for PGBouncer"
   type        = string
   default     = "t3.micro"
 }
 
 variable "pgbouncer_ami_id" {
-  description = "AMI ID for PGBouncer instances (defaults to latest Amazon Linux 2)"
+  description = "AMI ID for PGBouncer"
   type        = string
   default     = ""
 }
 
 variable "pgbouncer_min_capacity" {
-  description = "Minimum capacity for PGBouncer Auto Scaling Group"
+  description = "Minimum capacity for PGBouncer ASG"
   type        = number
   default     = 1
 }
 
 variable "pgbouncer_max_capacity" {
-  description = "Maximum capacity for PGBouncer Auto Scaling Group"
+  description = "Maximum capacity for PGBouncer ASG"
   type        = number
   default     = 3
 }
 
 variable "pgbouncer_desired_capacity" {
-  description = "Desired capacity for PGBouncer Auto Scaling Group"
+  description = "Desired capacity for PGBouncer ASG"
   type        = number
   default     = 2
 }
 
 variable "pgbouncer_port" {
-  description = "Port on which PGBouncer listens for connections"
+  description = "Port for PGBouncer"
   type        = number
   default     = 6432
 }
 
 variable "pgbouncer_max_client_conn" {
-  description = "Maximum number of client connections allowed by PGBouncer"
+  description = "Maximum client connections for PGBouncer"
   type        = number
   default     = 1000
 }
 
 variable "pgbouncer_default_pool_size" {
-  description = "Default pool size used by PGBouncer"
+  description = "Default pool size for PGBouncer"
   type        = number
   default     = 20
 }
@@ -521,19 +480,78 @@ variable "pgbouncer_create_lb" {
 
 variable "lambda_functions" {
   description = "Map of Lambda functions to create"
-  type        = map(object({
-    description          = string
-    handler              = string
-    runtime              = string
-    memory_size          = number
-    timeout              = number
-    s3_bucket            = optional(string)
-    s3_key               = optional(string)
-    source_code_path     = optional(string)
-    environment_variables = optional(map(string), {})
-    db_access_enabled     = optional(bool, false)
-    vpc_config_enabled    = optional(bool, false)
-    schedule_expression   = optional(string, "")
+  type = map(object({
+    description            = string
+    handler                = string
+    runtime                = string
+    memory_size            = number
+    timeout                = number
+    s3_bucket              = string
+    s3_key                 = string
+    environment_variables   = map(string)
+    db_access_enabled      = bool
+    vpc_config_enabled     = bool
+    schedule_expression    = string
   }))
-  default     = {}
+  default = {}
+}
+
+###########################################################################
+# Team-Specific Configuration
+###########################################################################
+
+variable "teams" {
+  description = "Map of team configurations"
+  type = map(object({
+    application_name    = string
+    database_name      = string
+    master_username    = string
+    instance_count     = number
+    instance_class     = string
+    allowed_cidrs      = list(string)
+    backup_retention_period = optional(number, 7)
+    performance_insights_enabled = optional(bool, true)
+    performance_insights_retention_period = optional(number, 7)
+    monitoring_interval = optional(number, 60)
+    db_cluster_parameters = optional(map(string), {})
+    db_instance_parameters = optional(map(string), {})
+    create_cloudwatch_alarms = optional(bool, true)
+    create_sns_topic = optional(bool, true)
+    create_db_credentials_secret = optional(bool, true)
+    generate_master_password = optional(bool, true)
+    create_db_event_subscription = optional(bool, true)
+    create_db_access_role = optional(bool, true)
+    create_eks_integration = optional(bool, false)
+    create_eks_secrets_access = optional(bool, false)
+    create_eks_irsa_access = optional(bool, false)
+    create_eks_k8s_resources = optional(bool, false)
+    create_eks_service_account = optional(bool, false)
+    eks_cluster_name = optional(string, "")
+    eks_namespace = optional(string, "default")
+    eks_service_account_name = optional(string, "db-access")
+    create_pgbouncer = optional(bool, false)
+    pgbouncer_instance_type = optional(string, "t3.micro")
+    pgbouncer_min_capacity = optional(number, 1)
+    pgbouncer_max_capacity = optional(number, 3)
+    pgbouncer_desired_capacity = optional(number, 2)
+    pgbouncer_port = optional(number, 6432)
+    pgbouncer_max_client_conn = optional(number, 1000)
+    pgbouncer_default_pool_size = optional(number, 20)
+    pgbouncer_create_lb = optional(bool, true)
+    create_lambda_functions = optional(bool, false)
+    lambda_functions = optional(map(object({
+      description            = string
+      handler                = string
+      runtime                = string
+      memory_size            = number
+      timeout                = number
+      s3_bucket              = string
+      s3_key                 = string
+      environment_variables   = map(string)
+      db_access_enabled      = bool
+      vpc_config_enabled     = bool
+      schedule_expression    = string
+    })), {})
+  }))
+  default = {}
 }
