@@ -8,11 +8,6 @@ output "vpc_cidr_block" {
   value       = local.is_dummy_vpc ? "10.0.0.0/16" : data.aws_vpc.selected[0].cidr_block
 }
 
-output "public_subnet_ids" {
-  description = "List of IDs of public subnets"
-  value       = local.public_subnet_ids
-}
-
 output "private_subnet_ids" {
   description = "List of IDs of private subnets"
   value       = local.private_subnet_ids

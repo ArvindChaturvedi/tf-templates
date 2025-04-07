@@ -7,7 +7,7 @@ yum install -y amazon-ssm-agent
 systemctl enable amazon-ssm-agent
 systemctl start amazon-ssm-agent
 
-yum install -y gcc make wget unzip jq postgresql-devel python3-pip
+yum install -y gcc make wget unzip jq postgresql-devel python3-pip bind-utils
 
 # Install AWS CLI v2
 curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"
@@ -35,6 +35,17 @@ else
     db_username="${db_username}"
     db_password="${db_password}"
 fi
+
+# Wait for DNS resolution of Aurora DB endpoint
+echo "Waiting for Aurora DB endpoint DNS resolution..."
+for i in {1..30}; do
+    if host ${db_host} > /dev/null 2>&1; then
+        echo "DNS resolution successful"
+        break
+    fi
+    echo "Attempt $i: Waiting for DNS resolution..."
+    sleep 10
+done
 
 # Configure pgbouncer.ini
 cat > /etc/pgbouncer/pgbouncer.ini << EOF
@@ -100,19 +111,36 @@ ExecReload=/bin/kill -HUP \$MAINPID
 KillMode=mixed
 KillSignal=SIGINT
 TimeoutSec=0
+Restart=always
+RestartSec=1
 
 [Install]
 WantedBy=multi-user.target
 EOF
 
-# Create directories for pgbouncer to use
-mkdir -p /var/run/pgbouncer
-chown pgbouncer:pgbouncer /var/run/pgbouncer
+# Create health check script
+cat > /usr/local/bin/health_check.sh << EOF
+#!/bin/bash
+PGPASSWORD=pgbouncer psql -h 127.0.0.1 -p ${pgbouncer_port} -U pgbouncer pgbouncer -c "SHOW POOLS;" > /dev/null 2>&1
+exit \$?
+EOF
 
-# Enable and start pgbouncer service
+chmod +x /usr/local/bin/health_check.sh
+
+# Start PgBouncer
 systemctl daemon-reload
 systemctl enable pgbouncer
 systemctl start pgbouncer
+
+# Wait for PgBouncer to start
+for i in {1..30}; do
+    if systemctl is-active --quiet pgbouncer; then
+        echo "PgBouncer started successfully"
+        break
+    fi
+    echo "Attempt $i: Waiting for PgBouncer to start..."
+    sleep 5
+done
 
 # Setup CloudWatch agent for monitoring
 yum install -y amazon-cloudwatch-agent

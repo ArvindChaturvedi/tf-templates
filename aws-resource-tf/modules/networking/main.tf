@@ -9,7 +9,6 @@ locals {
   db_security_group_ids = length(var.existing_security_group_ids) > 0 ? var.existing_security_group_ids : [aws_security_group.database[0].id]
 
   # Process provided subnet IDs
-  public_subnet_ids = var.public_subnet_ids
   private_subnet_ids = var.private_subnet_ids
   
   # Check if we're using dummy values (for planning only)
@@ -29,11 +28,6 @@ data "aws_subnet" "private" {
   id    = local.private_subnet_ids[count.index]
 }
 
-data "aws_subnet" "public" {
-  count = local.is_dummy_subnet ? 0 : length(local.public_subnet_ids)
-  id    = local.public_subnet_ids[count.index]
-}
-
 # Security Group for Database access
 resource "aws_security_group" "database" {
   count = length(var.existing_security_group_ids) == 0 ? 1 : 0
@@ -48,22 +42,20 @@ resource "aws_security_group" "database" {
     to_port     = var.db_port
     protocol    = "tcp"
     cidr_blocks = var.allowed_cidr_blocks
-    description = "Allow database port access from specified CIDRs"
   }
 
-  # Egress - allow all traffic out
+  # Allow all outbound traffic
   egress {
     from_port   = 0
     to_port     = 0
     protocol    = "-1"
     cidr_blocks = ["0.0.0.0/0"]
-    description = "Allow all outbound traffic"
   }
 
   tags = merge(
     var.tags,
     {
-      "Name" = "${var.name}-database-sg"
-    },
+      Name = "${var.name}-database-sg"
+    }
   )
 }

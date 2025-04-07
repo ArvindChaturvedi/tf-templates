@@ -210,11 +210,11 @@ module "pgbouncer" {
   
   # Network Configuration
   vpc_id              = module.networking.vpc_id
-  subnet_ids          = module.networking.public_subnet_ids
+  subnet_ids          = module.networking.private_subnet_ids
   region              = var.aws_region
   
   # DB Connection Information
-  db_endpoint         = var.create_aurora_db ? module.aurora_db[0].cluster_endpoint : var.existing_db_endpoint
+  db_endpoint         = module.aurora_db[0].cluster_endpoint
   db_port             = var.db_port
   database_name       = var.database_name
   db_username         = var.master_username
@@ -232,10 +232,16 @@ module "pgbouncer" {
   pgbouncer_default_pool_size = var.pgbouncer_default_pool_size
   
   # Load Balancer Configuration
-  create_lb = var.pgbouncer_create_lb
+  create_lb = true
+  assign_public_ip = false
   
   # Security Configuration 
   allowed_security_group_ids = module.networking.db_security_group_ids
+  
+  # DB Credentials from Secrets Manager
+  db_credentials_secret_arn = var.create_db_credentials_secret ? module.security.db_credentials_secret_arn : ""
+  
+  depends_on = [module.aurora_db]
   
   tags = local.tags
 }

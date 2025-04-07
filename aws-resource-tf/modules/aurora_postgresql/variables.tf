@@ -68,13 +68,13 @@ variable "instance_class" {
 variable "engine_version" {
   description = "Aurora PostgreSQL engine version"
   type        = string
-  default     = "13.7"
+  default     = "14.6"
 }
 
 variable "db_parameter_group_family" {
   description = "Family of the DB parameter group"
   type        = string
-  default     = "aurora-postgresql13"
+  default     = "aurora-postgresql14"
 }
 
 variable "cluster_parameters" {
@@ -104,7 +104,7 @@ variable "preferred_backup_window" {
 variable "preferred_maintenance_window" {
   description = "The weekly time range during which system maintenance can occur"
   type        = string
-  default     = "sun:04:00-sun:05:00"
+  default     = "sun:05:00-sun:06:00"
 }
 
 variable "storage_encrypted" {
@@ -158,7 +158,7 @@ variable "enabled_cloudwatch_logs_exports" {
 variable "monitoring_interval" {
   description = "The interval, in seconds, between points when Enhanced Monitoring metrics are collected for the DB instance"
   type        = number
-  default     = 0 # 0 means monitoring is disabled
+  default     = 60 # 0 means monitoring is disabled
 }
 
 variable "monitoring_role_arn" {
@@ -170,7 +170,7 @@ variable "monitoring_role_arn" {
 variable "performance_insights_enabled" {
   description = "Specifies whether Performance Insights are enabled"
   type        = bool
-  default     = false
+  default     = true
 }
 
 variable "performance_insights_retention_period" {
