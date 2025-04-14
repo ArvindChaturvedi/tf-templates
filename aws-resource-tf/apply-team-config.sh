@@ -56,6 +56,39 @@ cat > "teams/${TEAM_NAME}/${ENVIRONMENT}/terraform.tfvars.json" << EOF
   "create_pgbouncer": false,
   "create_eks_integration": false,
   
+  "create_serverless_lambda": true,
+  "lambda_git_repository_url": "https://github.com/your-org/${TEAM_NAME}-lambda-functions.git",
+  "lambda_git_repository_branch": "main",
+  "lambda_git_repository_token": "",
+  "lambda_functions": {
+    "call-group": {
+      "description": "Function to handle call group operations",
+      "runtime": "python3.9",
+      "handler": "call-group.handler",
+      "source_dir": "functions/call-group",
+      "environment_variables": {
+        "SCRIPT_PATH": "/function-job-scripts/call-group.sh"
+      },
+      "timeout": 300,
+      "memory_size": 256,
+      "build_command": "pip install -r requirements.txt -t ."
+    },
+    "vacuum-analyse": {
+      "description": "Function to handle vacuum and analyse operations",
+      "runtime": "python3.9",
+      "handler": "vacuum-analyse.handler",
+      "source_dir": "functions/vacuum-analyse",
+      "environment_variables": {
+        "SCRIPT_PATH": "/function-job-scripts/vacuum-analyse.sh"
+      },
+      "timeout": 600,
+      "memory_size": 512,
+      "build_command": "pip install -r requirements.txt -t ."
+    }
+  },
+  "enable_lambda_xray": true,
+  "enable_lambda_alarms": true,
+  
   "db_cluster_parameters": {
     "rds.force_ssl": "1",
     "pg_stat_statements.track": "all"
@@ -96,6 +129,46 @@ create_db_access_role = true
 
 create_pgbouncer = false
 create_eks_integration = false
+
+create_serverless_lambda = true
+lambda_git_repository_url = "https://github.com/your-org/${TEAM_NAME}-lambda-functions.git"
+lambda_git_repository_branch = "main"
+lambda_git_repository_token = ""
+
+lambda_functions = {
+  call-group = {
+    description = "Function to handle call group operations"
+    runtime     = "python3.9"
+    handler     = "call-group.handler"
+    source_dir  = "functions/call-group"
+    
+    environment_variables = {
+      SCRIPT_PATH = "/function-job-scripts/call-group.sh"
+    }
+    
+    timeout     = 300
+    memory_size = 256
+    build_command = "pip install -r requirements.txt -t ."
+  }
+  
+  vacuum-analyse = {
+    description = "Function to handle vacuum and analyse operations"
+    runtime     = "python3.9"
+    handler     = "vacuum-analyse.handler"
+    source_dir  = "functions/vacuum-analyse"
+    
+    environment_variables = {
+      SCRIPT_PATH = "/function-job-scripts/vacuum-analyse.sh"
+    }
+    
+    timeout     = 600
+    memory_size = 512
+    build_command = "pip install -r requirements.txt -t ."
+  }
+}
+
+enable_lambda_xray = true
+enable_lambda_alarms = true
 
 db_cluster_parameters = {
   "rds.force_ssl"              = "1"

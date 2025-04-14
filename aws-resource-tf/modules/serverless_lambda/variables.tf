@@ -8,6 +8,24 @@ variable "environment" {
   type        = string
 }
 
+variable "git_repository_url" {
+  description = "URL of the Git repository containing Lambda functions"
+  type        = string
+}
+
+variable "git_repository_branch" {
+  description = "Branch of the Git repository to use"
+  type        = string
+  default     = "main"
+}
+
+variable "git_repository_token" {
+  description = "Personal access token for private Git repositories"
+  type        = string
+  default     = ""
+  sensitive   = true
+}
+
 variable "functions" {
   description = "Map of Lambda functions to create"
   type = map(object({
@@ -19,15 +37,6 @@ variable "functions" {
     environment_variables = optional(map(string), {})
     timeout              = optional(number, 30)
     memory_size         = optional(number, 128)
-    
-    api_gateway = optional(object({
-      enabled     = bool
-      http_method = string
-      path        = string
-      cors_enabled = optional(bool, false)
-      authorizer_enabled = optional(bool, false)
-      authorizer_type = optional(string, "JWT")
-    }), null)
     
     vpc_config = optional(object({
       subnet_ids         = list(string)
@@ -56,12 +65,6 @@ variable "tags" {
   description = "Tags to apply to all resources"
   type        = map(string)
   default     = {}
-}
-
-variable "api_gateway_stage_name" {
-  description = "Name of the API Gateway stage"
-  type        = string
-  default     = "api"
 }
 
 variable "enable_xray" {

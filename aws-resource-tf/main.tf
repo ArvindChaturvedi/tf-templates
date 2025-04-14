@@ -20,7 +20,6 @@ module "networking" {
 
   name               = "${local.name_prefix}-network"
   vpc_id             = var.existing_vpc_id
-  public_subnet_ids  = var.existing_public_subnet_ids
   private_subnet_ids = var.existing_private_subnet_ids
   
   db_port             = var.db_port
@@ -274,6 +273,35 @@ module "lambda_functions" {
     DB_HOST = var.create_aurora_db ? module.aurora_db[0].cluster_endpoint : var.existing_db_endpoint
     DB_PORT = tostring(var.db_port)
     DB_NAME = var.database_name
+  }
+  
+  tags = local.tags
+}
+
+###########################################################################
+# Serverless Lambda Functions Module - Only created if explicitly enabled
+###########################################################################
+
+module "serverless_lambda" {
+  count  = var.create_serverless_lambda ? 1 : 0
+  source = "./modules/serverless_lambda"
+  
+  name_prefix = "${local.name_prefix}-lambda"
+  environment = var.environment
+  
+  git_repository_url    = var.lambda_git_repository_url
+  git_repository_branch = var.lambda_git_repository_branch
+  git_repository_token  = var.lambda_git_repository_token
+  
+  functions = var.lambda_functions
+  
+  enable_xray = var.enable_lambda_xray
+  enable_cloudwatch_alarms = var.enable_lambda_alarms
+  alarm_actions = var.create_sns_topic ? [module.security.sns_topic_arn] : []
+  
+  common_environment_variables = {
+    ENVIRONMENT = var.environment
+    REGION     = var.aws_region
   }
   
   tags = local.tags

@@ -15,7 +15,7 @@ output "private_subnet_ids" {
 
 output "public_subnet_ids" {
   description = "List of public subnet IDs"
-  value       = module.networking.public_subnet_ids
+  value       = var.existing_public_subnet_ids
 }
 
 output "db_security_group_id" {

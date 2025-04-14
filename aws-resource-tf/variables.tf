@@ -524,17 +524,30 @@ variable "pgbouncer_create_lb" {
 variable "lambda_functions" {
   description = "Map of Lambda functions to create"
   type = map(object({
-    description            = string
-    handler                = string
-    runtime                = string
-    memory_size            = number
-    timeout                = number
-    s3_bucket              = string
-    s3_key                 = string
-    environment_variables   = map(string)
-    db_access_enabled      = bool
-    vpc_config_enabled     = bool
-    schedule_expression    = string
+    description = string
+    runtime     = string
+    handler     = string
+    source_dir  = string
+    
+    environment_variables = optional(map(string), {})
+    timeout              = optional(number, 30)
+    memory_size         = optional(number, 128)
+    
+    vpc_config = optional(object({
+      subnet_ids         = list(string)
+      security_group_ids = list(string)
+    }), null)
+    
+    event_source = optional(object({
+      type       = string
+      source_arn = string
+    }), null)
+    
+    layers = optional(list(string), [])
+    build_command = optional(string, "")
+    runtime_dependencies = optional(list(string), [])
+    log_retention_days = optional(number, 14)
+    reserved_concurrent_executions = optional(number, -1)
   }))
   default = {}
 }
@@ -660,4 +673,45 @@ variable "existing_db_endpoint" {
   description = "Endpoint of an existing Aurora DB cluster"
   type        = string
   default     = ""
+}
+
+###########################################################################
+# Serverless Lambda Functions Variables
+###########################################################################
+
+variable "create_serverless_lambda" {
+  description = "Whether to create serverless Lambda functions"
+  type        = bool
+  default     = false
+}
+
+variable "lambda_git_repository_url" {
+  description = "URL of the Git repository containing Lambda functions"
+  type        = string
+  default     = ""
+}
+
+variable "lambda_git_repository_branch" {
+  description = "Branch of the Git repository to use"
+  type        = string
+  default     = "main"
+}
+
+variable "lambda_git_repository_token" {
+  description = "Personal access token for private Git repositories"
+  type        = string
+  default     = ""
+  sensitive   = true
+}
+
+variable "enable_lambda_xray" {
+  description = "Enable X-Ray tracing for Lambda functions"
+  type        = bool
+  default     = false
+}
+
+variable "enable_lambda_alarms" {
+  description = "Enable CloudWatch alarms for Lambda functions"
+  type        = bool
+  default     = true
 }
