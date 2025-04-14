@@ -1,5 +1,5 @@
 aws_region = "us-east-1"
-environment = "dev"
+environment = "stage"
 project_name = "team-alpha"
 owner = "devops-team"
 
