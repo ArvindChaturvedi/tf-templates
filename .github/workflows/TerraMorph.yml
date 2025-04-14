@@ -80,7 +80,14 @@ jobs:
 
       - name: Verify configuration file exists
         run: |
-          CONFIG_FILE="aws-resource-tf/config/${{ env.TEAM }}/${{ env.ENVIRONMENT }}.tfvars.json"
+          # Check in teams directory first (new structure)
+          CONFIG_FILE="aws-resource-tf/teams/${{ env.TEAM }}/${{ env.ENVIRONMENT }}/terraform.tfvars.json"
+          
+          if [ ! -f "$CONFIG_FILE" ]; then
+            # Fall back to config directory (old structure)
+            CONFIG_FILE="aws-resource-tf/config/${{ env.TEAM }}/${{ env.ENVIRONMENT }}.tfvars.json"
+          fi
+          
           if [ ! -f "$CONFIG_FILE" ]; then
             CONFIG_FILE="aws-resource-tf/config/${{ env.TEAM }}/${{ env.ENVIRONMENT }}/terraform.tfvars.json"
           fi
@@ -145,9 +152,16 @@ jobs:
 
       - name: Verify configuration file exists
         run: |
-          CONFIG_FILE="config/${{ env.TEAM }}/${{ env.ENVIRONMENT }}.tfvars.json"
+          # Check in teams directory first (new structure)
+          CONFIG_FILE="aws-resource-tf/teams/${{ env.TEAM }}/${{ env.ENVIRONMENT }}/terraform.tfvars.json"
+          
           if [ ! -f "$CONFIG_FILE" ]; then
-            CONFIG_FILE="config/${{ env.TEAM }}/${{ env.ENVIRONMENT }}/terraform.tfvars.json"
+            # Fall back to config directory (old structure)
+            CONFIG_FILE="aws-resource-tf/config/${{ env.TEAM }}/${{ env.ENVIRONMENT }}.tfvars.json"
+          fi
+          
+          if [ ! -f "$CONFIG_FILE" ]; then
+            CONFIG_FILE="aws-resource-tf/config/${{ env.TEAM }}/${{ env.ENVIRONMENT }}/terraform.tfvars.json"
           fi
           
           if [ ! -f "$CONFIG_FILE" ]; then
@@ -193,6 +207,11 @@ jobs:
           if terraform output -json | grep -q "lambda_function_names"; then
             echo "LAMBDAS=$(terraform output -json lambda_function_names)" >> $GITHUB_ENV
           fi
+          
+          # Check if serverless Lambda functions were created
+          if terraform output -json | grep -q "function_names"; then
+            echo "SERVERLESS_LAMBDAS=$(terraform output -json function_names)" >> $GITHUB_ENV
+          fi
 
       - name: Create Deployment Summary
         run: |
@@ -218,6 +237,11 @@ jobs:
           if [ -n "${{ env.LAMBDAS }}" ]; then
             echo "- ✅ Lambda Functions" >> $GITHUB_STEP_SUMMARY
             echo "  - Functions: ${{ env.LAMBDAS }}" >> $GITHUB_STEP_SUMMARY
+          fi
+          
+          if [ -n "${{ env.SERVERLESS_LAMBDAS }}" ]; then
+            echo "- ✅ Serverless Lambda Functions" >> $GITHUB_STEP_SUMMARY
+            echo "  - Functions: ${{ env.SERVERLESS_LAMBDAS }}" >> $GITHUB_STEP_SUMMARY
           fi
 
       - name: Send Notification
