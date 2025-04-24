@@ -213,6 +213,11 @@ jobs:
             echo "SERVERLESS_LAMBDAS=$(terraform output -json function_names)" >> $GITHUB_ENV
           fi
 
+          # Check if Route53 records were created
+          if terraform output -json | grep -q "route53_record_fqdns"; then
+            echo "ROUTE53_RECORDS=$(terraform output -json route53_record_fqdns)" >> $GITHUB_ENV
+          fi
+
       - name: Create Deployment Summary
         run: |
           echo "## Deployment Complete" > $GITHUB_STEP_SUMMARY
@@ -242,6 +247,11 @@ jobs:
           if [ -n "${{ env.SERVERLESS_LAMBDAS }}" ]; then
             echo "- ✅ Serverless Lambda Functions" >> $GITHUB_STEP_SUMMARY
             echo "  - Functions: ${{ env.SERVERLESS_LAMBDAS }}" >> $GITHUB_STEP_SUMMARY
+          fi
+
+          if [ -n "${{ env.ROUTE53_RECORDS }}" ]; then
+            echo "- ✅ Route53 Records" >> $GITHUB_STEP_SUMMARY
+            echo "  - Records: ${{ env.ROUTE53_RECORDS }}" >> $GITHUB_STEP_SUMMARY
           fi
 
       - name: Send Notification

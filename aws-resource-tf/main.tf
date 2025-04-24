@@ -306,3 +306,15 @@ module "serverless_lambda" {
   
   tags = local.tags
 }
+
+module "route53" {
+  source = "./modules/route53"
+  count  = var.create_route53_records ? 1 : 0
+
+  create_route53_records = var.create_route53_records
+  hosted_zone_id        = var.route53_hosted_zone_id
+  hosted_zone_name      = var.route53_hosted_zone_name
+  records               = var.route53_records
+
+  tags = local.common_tags
+}

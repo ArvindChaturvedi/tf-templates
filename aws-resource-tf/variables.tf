@@ -715,3 +715,37 @@ variable "enable_lambda_alarms" {
   type        = bool
   default     = true
 }
+
+variable "create_route53_records" {
+  description = "Whether to create Route53 records"
+  type        = bool
+  default     = false
+}
+
+variable "route53_hosted_zone_id" {
+  description = "The ID of the hosted zone where records will be created"
+  type        = string
+  default     = ""
+}
+
+variable "route53_hosted_zone_name" {
+  description = "The name of the hosted zone (used if hosted_zone_id is not provided)"
+  type        = string
+  default     = ""
+}
+
+variable "route53_records" {
+  description = "Map of Route53 records to create"
+  type = map(object({
+    name    = string
+    type    = string
+    ttl     = optional(number, 300)
+    records = list(string)
+    alias = optional(object({
+      name                   = string
+      zone_id               = string
+      evaluate_target_health = optional(bool, true)
+    }), null)
+  }))
+  default = {}
+}

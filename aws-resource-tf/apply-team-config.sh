@@ -97,6 +97,32 @@ cat > "teams/${TEAM_NAME}/${ENVIRONMENT}/terraform.tfvars.json" << EOF
     "log_min_duration_statement": "1000",
     "log_connections": "1",
     "log_disconnections": "1"
+  },
+  
+  "create_route53_records": true,
+  "route53_hosted_zone_name": "${TEAM_NAME}.example.com",
+  "route53_records": {
+    "www": {
+      "name": "www.${TEAM_NAME}.example.com",
+      "type": "A",
+      "ttl": 300,
+      "records": ["192.168.1.1"]
+    },
+    "api": {
+      "name": "api.${TEAM_NAME}.example.com",
+      "type": "CNAME",
+      "ttl": 300,
+      "records": ["www.${TEAM_NAME}.example.com"]
+    },
+    "app": {
+      "name": "app.${TEAM_NAME}.example.com",
+      "type": "A",
+      "alias": {
+        "name": "my-load-balancer.region.elb.amazonaws.com",
+        "zone_id": "Z35SXDOTRQ7X7K",
+        "evaluate_target_health": true
+      }
+    }
   }
 }
 EOF
@@ -179,6 +205,34 @@ db_instance_parameters = {
   "log_min_duration_statement" = "1000"
   "log_connections"            = "1"
   "log_disconnections"         = "1"
+}
+
+create_route53_records = true
+route53_hosted_zone_name = "${TEAM_NAME}.example.com"
+route53_records = {
+  www = {
+    name    = "www.${TEAM_NAME}.example.com"
+    type    = "A"
+    ttl     = 300
+    records = ["192.168.1.1"]
+  }
+  
+  api = {
+    name    = "api.${TEAM_NAME}.example.com"
+    type    = "CNAME"
+    ttl     = 300
+    records = ["www.${TEAM_NAME}.example.com"]
+  }
+  
+  app = {
+    name = "app.${TEAM_NAME}.example.com"
+    type = "A"
+    alias = {
+      name                   = "my-load-balancer.region.elb.amazonaws.com"
+      zone_id               = "Z35SXDOTRQ7X7K"
+      evaluate_target_health = true
+    }
+  }
 }
 EOF
 

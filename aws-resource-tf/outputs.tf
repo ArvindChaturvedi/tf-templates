@@ -146,3 +146,23 @@ output "lambda_function_names" {
   description = "Map of Lambda function names"
   value       = var.create_lambda_functions ? module.lambda_functions[0].function_names : null
 }
+
+output "route53_record_ids" {
+  description = "Map of Route53 record IDs"
+  value       = var.create_route53_records ? module.route53[0].route53_record_ids : {}
+}
+
+output "route53_record_fqdns" {
+  description = "Map of Route53 record FQDNs"
+  value       = var.create_route53_records ? module.route53[0].route53_record_fqdns : {}
+}
+
+output "route53_hosted_zone_id" {
+  description = "The ID of the hosted zone"
+  value       = var.create_route53_records ? module.route53[0].hosted_zone_id : ""
+}
+
+output "route53_hosted_zone_name" {
+  description = "The name of the hosted zone"
+  value       = var.create_route53_records ? module.route53[0].hosted_zone_name : ""
+}
