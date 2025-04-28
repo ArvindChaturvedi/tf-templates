@@ -1,0 +1,59 @@
+@startuml
+participant "App Developer" as AppDev
+participant "Helm Engineer" as HelmDev
+participant "Reviewer/QA" as Reviewer
+participant "App Git Repo" as AppRepo
+participant "Helm Git Repo" as HelmRepo
+participant "CI Pipeline (Docker Build)" as CI
+participant "AWS ECR" as ECR
+participant "Helm Deployment Pipeline" as Helm
+participant "ArgoCD" as ArgoCD
+participant "Canary Controller & Test Suite" as Canary
+participant "Metadata Store" as Metadata
+
+' Stage 1: Initiating Changes (Parallel flows for App and Helm)
+par Application Codebase Flow
+    AppDev -> AppRepo: Create release branch & commit changes
+    AppDev -> AppRepo: Submit PR to QA branch
+    Reviewer -> AppRepo: Review & merge PR (create application release tag)
+    AppRepo -> CI: Trigger build using app release tag
+    CI -> ECR: Build Docker image and push to QA AWS ECR
+end
+
+par Helm Chart Flow
+    HelmDev -> HelmRepo: Create PR for Helm chart updates
+    Reviewer -> HelmRepo: Review & merge PR (generate helm chart release tag\nand update helm-release-metadata.yaml)
+end
+
+' Stage 2: Merging Flows and Updating Metadata Files
+alt Use Case: Only App Code Changes
+    ECR -> Helm: Notify new Docker image with app release tag
+    Helm -> Metadata: Update app-release-metadata.yaml with new app release tag
+else Use Case: Only Helm Chart Changes
+    HelmRepo -> Helm: Provide updated helm chart release tag
+    Helm -> Metadata: Update helm-release-metadata.yaml with new helm chart release tag
+else Use Case: Both App & Helm Code Changes
+    ECR -> Helm: Notify new Docker image with app release tag
+    HelmRepo -> Helm: Provide updated helm chart release tag
+    Helm -> Metadata: Update both app-release-metadata.yaml and helm-release-metadata.yaml with new tags
+end
+
+' Stage 3: Deployment Initiation via ArgoCD
+Helm -> ArgoCD: Push updated Helm chart with new metadata details
+ArgoCD -> Canary: Initiate canary deployment (set traffic to 20%)
+
+' Stage 4: Continuous Canary Testing Loop (20% Increments)
+loop Canary Deployment with Tests (every 20% increment)
+    Canary -> Canary: Run automated tests at current traffic level
+    alt Tests Pass
+         Canary -> Canary: Increase traffic by additional 20%
+         note right of Canary: Repeat until reaching 100% traffic
+    else Tests Fail
+         Canary -> ArgoCD: Trigger rollback using last known good release tag from Metadata
+    end
+end
+
+Canary -> ArgoCD: Confirm 100% rollout and successful deployment
+
+note over AppDev,HelmDev: Unified sequence supports:\n• Only App code changes (updates app-release-metadata.yaml)\n• Only Helm chart changes (updates helm-release-metadata.yaml)\n• Both changes (updates both metadata files)
+@enduml
