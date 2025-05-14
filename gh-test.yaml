@@ -1,0 +1,174 @@
+name: CD Helm Chart
+
+on:
+  # non‑prod: detect new release tags in metadata
+  push:
+    paths:
+      - 'app-release-metadata.yaml'
+      - 'helm-release-metadata.yaml'
+  # prod: manual dispatch with Jira ticket
+  workflow_dispatch:
+    inputs:
+      jira_ticket:
+        description: 'Jira ticket (e.g. PROJ-1234)'
+        required: true
+
+jobs:
+  # 1) decide which environments to run
+  set-matrix:
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.matrix.outputs.matrix }}
+    steps:
+      - id: matrix
+        run: |
+          if [ "${{ github.event_name }}" = "push" ]; then
+            echo "::set-output name=matrix::{\"include\":[{\"env\":\"develop\"},{\"env\":\"qa\"}]}"
+          else
+            echo "::set-output name=matrix::{\"include\":[{\"env\":\"production\",\"jira\":\"${{ github.event.inputs.jira_ticket }}\"}]}"
+          fi
+
+  # 2) for each env: bump metadata, deploy, canary + QA, notify
+  deploy:
+    needs: set-matrix
+    runs-on: ubuntu-latest
+    strategy:
+      matrix: ${{ fromJson(needs.set-matrix.outputs.matrix) }}
+    environment: ${{ matrix.env }}
+    defaults:
+      run:
+        shell: bash
+
+    steps:
+    # ———————— Checkout & setup ————————
+    - name: Checkout repo
+      uses: actions/checkout@v3
+      with:
+        fetch-depth: 0       # needed to push tags/commits
+
+    - name: Install dependencies
+      run: |
+        curl -sSL -o /usr/local/bin/argocd https://github.com/argoproj/argo-cd/releases/latest/download/argocd-linux-amd64
+        chmod +x /usr/local/bin/argocd
+
+    - name: Configure Git
+      run: |
+        git config user.name "github-actions[bot]"
+        git config user.email "github-actions[bot]@users.noreply.github.com"
+
+    # ———————— Read & bump metadata if needed ————————
+    - name: Parse metadata
+      id: meta
+      run: |
+        APP_PREV=$(yq e '.previous_release_tag' app-release-metadata.yaml)
+        APP_LATEST=$(yq e '.latest_release_tag' app-release-metadata.yaml)
+        CHART_PREV=$(yq e '.previous_release_tag' helm-release-metadata.yaml)
+        CHART_LATEST=$(yq e '.latest_release_tag' helm-release-metadata.yaml)
+        echo "app_prev=$APP_PREV"  >> $GITHUB_OUTPUT
+        echo "app_latest=$APP_LATEST" >> $GITHUB_OUTPUT
+        echo "chart_prev=$CHART_PREV"  >> $GITHUB_OUTPUT
+        echo "chart_latest=$CHART_LATEST" >> $GITHUB_OUTPUT
+
+    - name: Bump values & Chart version
+      if: steps.meta.outputs.app_prev != steps.meta.outputs.app_latest || steps.meta.outputs.chart_prev != steps.meta.outputs.chart_latest
+      run: |
+        set -e
+        # 1) update image tag in values.yaml
+        if [ "${{ steps.meta.outputs.app_prev }}" != "${{ steps.meta.outputs.app_latest }}" ]; then
+          yq e -i ".image.tag = \"${{ steps.meta.outputs.app_latest }}\"" values.yaml
+          yq e -i ".previous_release_tag = \"${{ steps.meta.outputs.app_latest }}\"" app-release-metadata.yaml
+        fi
+        # 2) bump Chart.yaml version
+        if [ "${{ steps.meta.outputs.chart_prev }}" != "${{ steps.meta.outputs.chart_latest }}" ]; then
+          yq e -i ".version = \"${{ steps.meta.outputs.chart_latest }}\"" Chart.yaml
+          yq e -i ".previous_release_tag = \"${{ steps.meta.outputs.chart_latest }}\"" helm-release-metadata.yaml
+        fi
+        git add values.yaml Chart.yaml app-release-metadata.yaml helm-release-metadata.yaml
+        git commit -m "chore: bump to app=${{ steps.meta.outputs.app_latest }}, chart=${{ steps.meta.outputs.chart_latest }}"
+        git push
+
+    # ———————— ArgoCD Sync & initiate canary ————————
+    - name: Login to ArgoCD
+      env:
+        ARGOCD_SERVER: ${{ secrets.ARGOCD_SERVER }}
+        ARGOCD_TOKEN: ${{ secrets.ARGOCD_TOKEN }}
+      run: |
+        argocd login $ARGOCD_SERVER --token $ARGOCD_TOKEN --insecure
+
+    - name: Trigger initial canary rollout
+      run: |
+        APP_NAME=<your-argocd-app-${{ matrix.env }}>     # ← replace with your actual ArgoCD App names
+        argocd app sync $APP_NAME
+        # assume your Rollout resource is named same as app
+        kubectl --context=$KUBE_CONTEXT_${{ matrix.env^^ }} \
+          argo rollouts set weight rollout/${APP_NAME} 30
+
+    # ———————— Phased QA and traffic increments ————————
+    - name: Loop canary steps
+      env:
+        QA_REPO: <org>/<qa-repo>                       # ← your QA tests repo
+        QA_WORKFLOW_FILE: "qa-tests.yml"               # ← your QA workflow filename
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        CONTEXT: ${{ matrix.env^^ }}
+      run: |
+        declare -a weights=(30 60 100)
+        PREV_WEIGHT=0
+        for W in "${weights[@]}"; do
+          if [ "$W" -eq 30 ]; then
+            echo "Already set to 30% above"
+          else
+            # advance rollout
+            kubectl --context=$KUBE_CONTEXT_${CONTEXT} \
+              argo rollouts set weight rollout/<your-rollout-name> $W
+          fi
+
+          # dispatch QA pipeline
+          echo "Dispatching QA workflow for weight=$W%"
+          gh workflow run $QA_WORKFLOW_FILE \
+            --repo $QA_REPO \
+            -f environment=${{ matrix.env }} \
+            -f canary_weight=$W
+
+          # poll for the latest workflow_run completion
+          echo "Waiting for QA workflow to finish…"
+          until gh run list --repo $QA_REPO \
+            --workflow=$QA_WORKFLOW_FILE \
+            --branch main \
+            --limit 1 \
+            --json conclusion,name,event \
+            | jq -r '.[0].conclusion' | grep -E 'success|failure'; do
+            sleep 15
+          done
+
+          STATUS=$(gh run list --repo $QA_REPO --workflow=$QA_WORKFLOW_FILE --limit 1 --json conclusion | jq -r '.[0].conclusion')
+          if [ "$STATUS" != "success" ]; then
+            echo "QA failed at $W%, rolling back…"
+            # rollback to last successful release tags
+            yq e -i ".image.tag = \"${{ steps.meta.outputs.app_prev }}\"" values.yaml
+            yq e -i ".version = \"${{ steps.meta.outputs.chart_prev }}\"" Chart.yaml
+            git commit -am "rollback: QA failed at ${W}%"
+            git push
+            exit 1
+          fi
+
+          PREV_WEIGHT=$W
+        done
+
+    # ———————— Slack notification ————————
+    - name: Notify Slack
+      if: success() && matrix.env != 'production'
+      env:
+        SLACK_WEBHOOK: ${{ secrets.SLACK_WEBHOOK_URL }}
+      run: |
+        curl -X POST -H 'Content-type: application/json' \
+          --data '{"text":"✅ Deployment `${{ steps.meta.outputs.chart_latest }}` succeeded in `'${{ matrix.env }}`"}' \
+          $SLACK_WEBHOOK
+
+    - name: Notify Slack (prod)
+      if: success() && matrix.env == 'production'
+      env:
+        SLACK_WEBHOOK: ${{ secrets.SLACK_WEBHOOK_URL }}
+      run: |
+        curl -X POST -H 'Content-type: application/json' \
+          --data '{"text":"✅ Production release `${{ steps.meta.outputs.chart_latest }}` succeeded. (Jira: `'${{ matrix.jira }}`)"}' \
+          $SLACK_WEBHOOK
