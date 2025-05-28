@@ -1,35 +1,70 @@
-| **Phase** | **Topic**                         | **Description**                                                                                      | **Why It Matters**                                                      |
-| --------- | --------------------------------- | ---------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------- |
-| **1**     | Introduction to Operating Systems | Basics of OS concepts: kernel, shell, processes, threads, file systems, and user management.         | Builds foundational knowledge to understand how Linux works.            |
-| **2**     | Linux Basics                      | Shell (bash), file navigation, permissions (`chmod`, `chown`), `ls`, `cd`, `mkdir`, `rm`, `cp`, etc. | Essential to navigate and automate in cloud and server environments.    |
-| **3**     | Users and Permissions             | Managing users/groups, sudo, file permissions, `umask`.                                              | Security and access control in Linux.                                   |
-| **4**     | Linux File System Structure       | `/etc`, `/home`, `/var`, `/usr`, `/opt`, `/tmp`, and mount points.                                   | Understand how files and configurations are organized.                  |
-| **5**     | Linux Networking Basics           | `ip`, `netstat`, `ping`, `curl`, `wget`, DNS, routing, ports, `ss`.                                  | Critical for debugging and configuring cloud networks and applications. |
-| **6**     | System Monitoring                 | Tools: `top`, `htop`, `free`, `df`, `du`, `ps`, `journalctl`, `systemctl`, `dmesg`.                  | Helps troubleshoot system performance and services.                     |
-| **7**     | Package Management                | `apt`, `yum`, `dnf`, `snap`, `rpm`, installing and removing packages.                                | Needed for managing tools and dependencies.                             |
-| **8**     | Bash Scripting                    | Writing simple shell scripts, variables, conditionals, loops, functions, cron jobs.                  | Forms the basis for automation and scripting in DevOps.                 |
+name: Sync App Release Tag to Helm Chart Repo
 
+on:
+  push:
+    tags:
+      - 'v*'  # Trigger on new tag creation only
+  workflow_dispatch:
 
-| **Phase** | **Topic**                    | **Description**                                                                | **Why It Matters**                                               |
-| --------- | ---------------------------- | ------------------------------------------------------------------------------ | ---------------------------------------------------------------- |
-| **1**     | AWS Overview                 | Learn about the AWS ecosystem, regions, availability zones, services, billing. | Provides big-picture understanding of cloud computing with AWS.  |
-| **2**     | IAM (Identity & Access Mgmt) | Users, roles, policies, groups, least privilege principle.                     | Security and access management is foundational in any AWS setup. |
-| **3**     | EC2 (Elastic Compute Cloud)  | Launch, SSH access, security groups, AMIs, key pairs, volumes, EBS snapshots.  | Learn to manage virtual servers — key DevOps responsibility.     |
-| **4**     | S3 (Simple Storage Service)  | Buckets, object storage, access policies, versioning, lifecycle policies.      | Widely used for storage, backups, and hosting static content.    |
-| **5**     | VPC (Virtual Private Cloud)  | Subnets, route tables, internet gateway, NAT gateway, security groups, NACLs.  | Networking is crucial for app communication and security in AWS. |
-| **6**     | CloudWatch Basics            | Logs, metrics, alarms, dashboards.                                             | Monitoring and alerting — a core DevOps need.                    |
-| **7**     | Elastic Load Balancing       | Types (ALB/NLB), listener rules, health checks.                                | For distributing traffic across applications.                    |
-| **8**     | Auto Scaling                 | Launch templates, groups, scaling policies.                                    | Helps build scalable and fault-tolerant systems.                 |
-| **9**     | RDS (Relational DB Service)  | Provisioning DBs, backups, multi-AZ, snapshots.                                | Cloud-native DB management.                                      |
-| **10**    | CLI & SDK Basics             | AWS CLI setup, configuring credentials, basic commands for EC2, S3, IAM.       | Automation and scripting interfaces to interact with AWS.        |
+jobs:
+  sync-release-tag:
+    runs-on: ubuntu-latest
 
+    steps:
+      - name: Checkout source (App) repo
+        uses: actions/checkout@v3
 
-| **Phase** | **Topic**          | **Description**                                                  | **Why It Matters**                                                  |
-| --------- | ------------------ | ---------------------------------------------------------------- | ------------------------------------------------------------------- |
-| **1**     | Git & GitHub       | Git basics, branching, merging, pull requests, GitHub workflows. | Version control is essential for collaborating and CI/CD workflows. |
-| **2**     | VS Code + Terminal | Using VS Code effectively with Linux terminal integration.       | Enhances development speed and environment management.              |
-| **3**     | Python Basics      | Variables, conditionals, loops, functions, packages, virtualenv. | Frequently used for scripting, automation, and working with APIs.   |
-| **4**     | YAML & JSON        | Reading/writing configuration files in YAML/JSON.                | Used everywhere: Kubernetes, CloudFormation, CI/CD, etc.            |
-| **5**     | Docker Basics      | Containers, Dockerfile, building images, running containers.     | Foundation for containerization and Kubernetes.                     |
-| **6**     | Terraform Basics   | Infrastructure as Code (IaC), deploying simple AWS resources.    | Essential for managing cloud infrastructure reliably.               |
-| **7**     | CI/CD Concepts     | Introduction to pipelines, GitHub Actions, or Jenkins basics.    | Core part of DevOps lifecycle for fast and reliable deployments.    |
+      - name: Extract branch from tag
+        id: get_branch
+        run: |
+          tag_ref=$(git for-each-ref --format='%(refname:short) %(creatordate:iso)' refs/remotes/origin | grep ${{ github.ref_name }} | sort -k2 | tail -n1 | awk '{print $1}')
+          branch=$(echo "$tag_ref" | sed 's|origin/||')
+          if [[ "$branch" == "qa" ]]; then
+            echo "helm_branch=qabranch" >> $GITHUB_OUTPUT
+          else
+            echo "helm_branch=$branch" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Set variables
+        id: vars
+        run: |
+          echo "new_tag=${GITHUB_REF_NAME}" >> $GITHUB_OUTPUT
+
+      - name: Checkout target Helm chart repo
+        uses: actions/checkout@v3
+        with:
+          repository: your-org-or-user/helm-chart-repo
+          token: ${{ secrets.TARGET_REPO_PAT }}
+          ref: ${{ steps.get_branch.outputs.helm_branch }}
+          path: helm-repo
+
+      - name: Install yq (Go binary version)
+        run: |
+          wget https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64 -O /usr/local/bin/yq
+          chmod +x /usr/local/bin/yq
+          yq --version
+
+      - name: Update app-release-metadata.yaml
+        run: |
+          cd helm-repo
+          FILE="app-release-metadata.yaml"
+
+          current_latest=$(yq '.app.latest_version' $FILE)
+
+          echo "Promoting $current_latest to last_successful_version"
+          echo "Setting new latest_version to ${{ steps.vars.outputs.new_tag }}"
+
+          yq -i '.app.last_successful_version = .app.latest_version' $FILE
+          yq -i ".app.latest_version = \"${{ steps.vars.outputs.new_tag }}\"" $FILE
+
+          echo "Updated YAML:"
+          cat $FILE
+
+      - name: Commit and push changes
+        run: |
+          cd helm-repo
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add app-release-metadata.yaml
+          git commit -m "Update latest_version to ${{ steps.vars.outputs.new_tag }}" || echo "No changes to commit"
+          git push origin ${{ steps.get_branch.outputs.helm_branch }}
