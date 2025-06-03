@@ -153,226 +153,144 @@ resource "aws_subnet" "private" {
 
 ## Scripting Questions
 
-### Question 8: Python DevOps Automation (Advanced)
-**Question:** Write a Python script that monitors AWS EC2 instances across multiple regions, identifies instances with high CPU utilization (>80%) for more than 10 minutes, and sends SNS notifications with instance details.
+### Question 8: Python AWS Automation (Intermediate - 10 mins)
+**Question:** Write a Python script that lists all EC2 instances across regions, shows their status, and identifies any instances without proper tags (Name tag missing).
 
 **Expected Answer:**
 ```python
 import boto3
-import json
-from datetime import datetime, timedelta
 from botocore.exceptions import ClientError
 
-class EC2Monitor:
-    def __init__(self):
-        self.ec2_regions = ['us-east-1', 'us-west-2', 'eu-west-1']
-        self.cpu_threshold = 80
-        self.time_period = 10  # minutes
-        
-    def get_high_cpu_instances(self, region):
-        """Get instances with high CPU utilization"""
-        ec2 = boto3.client('ec2', region_name=region)
-        cloudwatch = boto3.client('cloudwatch', region_name=region)
-        
+def check_ec2_instances():
+    """Check EC2 instances across regions for missing tags"""
+    regions = ['us-east-1', 'us-west-2', 'eu-west-1']
+    untagged_instances = []
+    
+    for region in regions:
         try:
-            # Get running instances
-            response = ec2.describe_instances(
-                Filters=[{'Name': 'instance-state-name', 'Values': ['running']}]
-            )
+            ec2 = boto3.client('ec2', region_name=region)
+            response = ec2.describe_instances()
             
-            high_cpu_instances = []
+            print(f"\n--- Region: {region} ---")
             
             for reservation in response['Reservations']:
                 for instance in reservation['Instances']:
                     instance_id = instance['InstanceId']
+                    state = instance['State']['Name']
+                    instance_type = instance['InstanceType']
                     
-                    # Get CPU metrics
-                    cpu_metrics = cloudwatch.get_metric_statistics(
-                        Namespace='AWS/EC2',
-                        MetricName='CPUUtilization',
-                        Dimensions=[{'Name': 'InstanceId', 'Value': instance_id}],
-                        StartTime=datetime.utcnow() - timedelta(minutes=self.time_period),
-                        EndTime=datetime.utcnow(),
-                        Period=300,  # 5-minute periods
-                        Statistics=['Average']
-                    )
+                    # Check for Name tag
+                    name_tag = None
+                    for tag in instance.get('Tags', []):
+                        if tag['Key'] == 'Name':
+                            name_tag = tag['Value']
+                            break
                     
-                    # Check if CPU is consistently high
-                    if cpu_metrics['Datapoints']:
-                        avg_cpu = sum(point['Average'] for point in cpu_metrics['Datapoints']) / len(cpu_metrics['Datapoints'])
-                        
-                        if avg_cpu > self.cpu_threshold:
-                            instance_info = {
-                                'InstanceId': instance_id,
-                                'InstanceType': instance['InstanceType'],
-                                'Region': region,
-                                'AvgCPU': round(avg_cpu, 2),
-                                'LaunchTime': instance['LaunchTime'].strftime('%Y-%m-%d %H:%M:%S')
-                            }
-                            
-                            # Get instance name from tags
-                            for tag in instance.get('Tags', []):
-                                if tag['Key'] == 'Name':
-                                    instance_info['Name'] = tag['Value']
-                                    break
-                            
-                            high_cpu_instances.append(instance_info)
-                            
+                    if not name_tag:
+                        untagged_instances.append({
+                            'InstanceId': instance_id,
+                            'Region': region,
+                            'State': state,
+                            'Type': instance_type
+                        })
+                    
+                    print(f"Instance: {instance_id} | State: {state} | Type: {instance_type} | Name: {name_tag or 'MISSING'}")
+                    
         except ClientError as e:
-            print(f"Error checking instances in {region}: {e}")
-            
-        return high_cpu_instances
+            print(f"Error in region {region}: {e}")
     
-    def send_sns_notification(self, instances):
-        """Send SNS notification for high CPU instances"""
-        if not instances:
-            return
-            
-        sns = boto3.client('sns', region_name='us-east-1')
-        
-        message = "High CPU Utilization Alert!\n\n"
-        message += "The following instances have CPU utilization > 80% for more than 10 minutes:\n\n"
-        
-        for instance in instances:
-            message += f"Instance ID: {instance['InstanceId']}\n"
-            message += f"Name: {instance.get('Name', 'N/A')}\n"
-            message += f"Type: {instance['InstanceType']}\n"
-            message += f"Region: {instance['Region']}\n"
-            message += f"Average CPU: {instance['AvgCPU']}%\n"
-            message += f"Launch Time: {instance['LaunchTime']}\n"
-            message += "-" * 40 + "\n"
-        
-        try:
-            response = sns.publish(
-                TopicArn='arn:aws:sns:us-east-1:123456789012:ec2-alerts',
-                Message=message,
-                Subject='EC2 High CPU Alert'
-            )
-            print(f"SNS notification sent: {response['MessageId']}")
-        except ClientError as e:
-            print(f"Error sending SNS notification: {e}")
-    
-    def monitor_instances(self):
-        """Main monitoring function"""
-        all_high_cpu_instances = []
-        
-        for region in self.ec2_regions:
-            print(f"Checking instances in region: {region}")
-            high_cpu_instances = self.get_high_cpu_instances(region)
-            all_high_cpu_instances.extend(high_cpu_instances)
-        
-        if all_high_cpu_instances:
-            print(f"Found {len(all_high_cpu_instances)} instances with high CPU")
-            self.send_sns_notification(all_high_cpu_instances)
-        else:
-            print("No instances with high CPU utilization found")
+    # Report untagged instances
+    if untagged_instances:
+        print(f"\n⚠️  Found {len(untagged_instances)} instances without Name tags:")
+        for instance in untagged_instances:
+            print(f"  - {instance['InstanceId']} ({instance['Region']}) - {instance['State']}")
+    else:
+        print("\n✅ All instances have proper Name tags!")
 
 if __name__ == "__main__":
-    monitor = EC2Monitor()
-    monitor.monitor_instances()
+    check_ec2_instances()
 ```
 
-### Question 9: Shell Script for Log Analysis (Intermediate)
-**Question:** Write a bash script that analyzes Apache access logs to find the top 10 IP addresses with the most requests, identifies potential security threats (based on HTTP status codes), and generates a summary report.
+**Follow-up Questions:**
+- How would you handle AWS credentials securely?
+- What if you needed to check 20+ regions efficiently?
+- How would you modify this to add missing tags automatically?
+
+### Question 9: Shell Script for System Health Check (Intermediate - 8 mins)
+**Question:** Write a bash script that performs a quick system health check and alerts if any metrics exceed thresholds (CPU >80%, Memory >85%, Disk >90%).
 
 **Expected Answer:**
 ```bash
 #!/bin/bash
 
-# Apache Log Analyzer Script
-# Usage: ./log_analyzer.sh /path/to/access.log
+# System Health Check Script
+# Thresholds
+CPU_THRESHOLD=80
+MEM_THRESHOLD=85
+DISK_THRESHOLD=90
 
-LOG_FILE="$1"
-REPORT_FILE="security_report_$(date +%Y%m%d_%H%M%S).txt"
+# Colors for output
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+NC='\033[0m' # No Color
 
-# Check if log file exists
-if [[ ! -f "$LOG_FILE" ]]; then
-    echo "Error: Log file '$LOG_FILE' not found!"
-    exit 1
+echo "=== System Health Check $(date) ==="
+
+# CPU Check
+CPU_USAGE=$(top -bn1 | grep "Cpu(s)" | awk '{print $2}' | cut -d'%' -f1)
+CPU_INT=${CPU_USAGE%.*}  # Convert to integer
+
+if [ "$CPU_INT" -gt "$CPU_THRESHOLD" ]; then
+    echo -e "${RED}[CRITICAL] CPU Usage: ${CPU_USAGE}% (>${CPU_THRESHOLD}%)${NC}"
+    ALERT=1
+else
+    echo -e "${GREEN}[OK] CPU Usage: ${CPU_USAGE}%${NC}"
 fi
 
-echo "Analyzing Apache Access Log: $LOG_FILE"
-echo "Report will be saved to: $REPORT_FILE"
+# Memory Check
+MEM_USAGE=$(free | grep Mem | awk '{printf "%.0f", $3/$2 * 100.0}')
+if [ "$MEM_USAGE" -gt "$MEM_THRESHOLD" ]; then
+    echo -e "${RED}[CRITICAL] Memory Usage: ${MEM_USAGE}% (>${MEM_THRESHOLD}%)${NC}"
+    ALERT=1
+else
+    echo -e "${GREEN}[OK] Memory Usage: ${MEM_USAGE}%${NC}"
+fi
 
-# Initialize report
-cat > "$REPORT_FILE" << EOF
-Apache Access Log Security Analysis Report
-Generated on: $(date)
-Log file: $LOG_FILE
-Total requests: $(wc -l < "$LOG_FILE")
-
-================================
-EOF
-
-# Top 10 IP addresses by request count
-echo "TOP 10 IP ADDRESSES BY REQUEST COUNT:" >> "$REPORT_FILE"
-echo "=====================================" >> "$REPORT_FILE"
-awk '{print $1}' "$LOG_FILE" | sort | uniq -c | sort -nr | head -10 | \
-while read count ip; do
-    echo "IP: $ip - Requests: $count" >> "$REPORT_FILE"
+# Disk Check
+echo "Disk Usage:"
+df -h | grep -vE '^Filesystem|tmpfs|cdrom' | awk '{print $5 " " $1}' | while read output;
+do
+    usage=$(echo $output | awk '{print $1}' | cut -d'%' -f1)
+    partition=$(echo $output | awk '{print $2}')
+    
+    if [ $usage -gt $DISK_THRESHOLD ]; then
+        echo -e "${RED}[CRITICAL] Disk ${partition}: ${usage}% (>${DISK_THRESHOLD}%)${NC}"
+        export ALERT=1
+    else
+        echo -e "${GREEN}[OK] Disk ${partition}: ${usage}%${NC}"
+    fi
 done
 
-echo "" >> "$REPORT_FILE"
+# Load Average
+LOAD=$(uptime | awk -F'load average:' '{print $2}' | cut -d, -f1 | xargs)
+echo -e "${YELLOW}[INFO] Load Average: ${LOAD}${NC}"
 
-# HTTP Status Code Analysis
-echo "HTTP STATUS CODE ANALYSIS:" >> "$REPORT_FILE"
-echo "=========================" >> "$REPORT_FILE"
-awk '{print $9}' "$LOG_FILE" | grep -E '^[0-9]{3}$' | sort | uniq -c | sort -nr >> "$REPORT_FILE"
-
-echo "" >> "$REPORT_FILE"
-
-# Security Threat Analysis
-echo "POTENTIAL SECURITY THREATS:" >> "$REPORT_FILE"
-echo "===========================" >> "$REPORT_FILE"
-
-# 4xx errors (potential attacks)
-echo "4xx Client Errors (Potential Attacks):" >> "$REPORT_FILE"
-awk '$9 ~ /^4[0-9][0-9]$/ {print $1, $9, $7}' "$LOG_FILE" | sort | uniq -c | sort -nr | head -20 >> "$REPORT_FILE"
-
-echo "" >> "$REPORT_FILE"
-
-# Suspicious URLs
-echo "Suspicious URL Patterns:" >> "$REPORT_FILE"
-grep -E "(\.\.\/|\/etc\/passwd|\/bin\/|admin|login|wp-admin)" "$LOG_FILE" | \
-awk '{print $1, $7}' | sort | uniq -c | sort -nr | head -10 >> "$REPORT_FILE"
-
-echo "" >> "$REPORT_FILE"
-
-# Large request analysis (potential DoS)
-echo "IPs with >100 requests (Potential DoS):" >> "$REPORT_FILE"
-awk '{print $1}' "$LOG_FILE" | sort | uniq -c | sort -nr | awk '$1 > 100 {print "IP: " $2 " - Requests: " $1}' >> "$REPORT_FILE"
-
-echo "" >> "$REPORT_FILE"
-
-# User Agent Analysis
-echo "TOP USER AGENTS:" >> "$REPORT_FILE"
-echo "===============" >> "$REPORT_FILE"
-awk -F'"' '{print $6}' "$LOG_FILE" | sort | uniq -c | sort -nr | head -10 >> "$REPORT_FILE"
-
-# Summary statistics
-echo "" >> "$REPORT_FILE"
-echo "SUMMARY STATISTICS:" >> "$REPORT_FILE"
-echo "==================" >> "$REPORT_FILE"
-
-total_requests=$(wc -l < "$LOG_FILE")
-unique_ips=$(awk '{print $1}' "$LOG_FILE" | sort -u | wc -l)
-error_4xx=$(awk '$9 ~ /^4[0-9][0-9]$/' "$LOG_FILE" | wc -l)
-error_5xx=$(awk '$9 ~ /^5[0-9][0-9]$/' "$LOG_FILE" | wc -l)
-
-echo "Total Requests: $total_requests" >> "$REPORT_FILE"
-echo "Unique IP Addresses: $unique_ips" >> "$REPORT_FILE"
-echo "4xx Errors: $error_4xx" >> "$REPORT_FILE"
-echo "5xx Errors: $error_5xx" >> "$REPORT_FILE"
-echo "Error Rate: $(echo "scale=2; ($error_4xx + $error_5xx) * 100 / $total_requests" | bc)%" >> "$REPORT_FILE"
-
-echo "Analysis complete! Report saved to: $REPORT_FILE"
-
-# Optional: Display critical alerts to console
-critical_ips=$(awk '{print $1}' "$LOG_FILE" | sort | uniq -c | sort -nr | awk '$1 > 1000 {print $2}' | wc -l)
-if [ "$critical_ips" -gt 0 ]; then
-    echo "ALERT: Found $critical_ips IP(s) with >1000 requests - potential DoS attack!"
+# Send alert if any threshold exceeded
+if [ "${ALERT}" = "1" ]; then
+    echo -e "\n${RED}⚠️  SYSTEM ALERT: One or more thresholds exceeded!${NC}"
+    # In production, you'd send email/Slack notification here
+    exit 1
+else
+    echo -e "\n${GREEN}✅ System health is normal${NC}"
+    exit 0
 fi
 ```
+
+**Follow-up Questions:**
+- How would you schedule this script to run periodically?
+- What other metrics would you add for a production server?
+- How would you implement alerting (email/Slack)?
 
 ## Additional Questions for Deeper Assessment
 
