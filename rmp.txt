@@ -1,70 +1,399 @@
-name: Sync App Release Tag to Helm Chart Repo
+# Senior DevOps Engineer Technical Interview Questions
 
-on:
-  push:
-    tags:
-      - 'v*'  # Trigger on new tag creation only
-  workflow_dispatch:
+## AWS & Cloud Engineering Questions
 
-jobs:
-  sync-release-tag:
-    runs-on: ubuntu-latest
+### Question 1: AWS Architecture Design (Advanced)
+**Question:** Design a highly available, auto-scaling web application architecture on AWS that serves global traffic. The application has a React frontend, Node.js API backend, and uses PostgreSQL database. Include disaster recovery considerations.
 
-    steps:
-      - name: Checkout source (App) repo
-        uses: actions/checkout@v3
+**Expected Answer:**
+- **Frontend**: CloudFront CDN with S3 static hosting, multiple edge locations
+- **Load Balancing**: Application Load Balancer (ALB) across multiple AZs
+- **Compute**: ECS Fargate or EKS for containerized Node.js API with auto-scaling groups
+- **Database**: RDS PostgreSQL with Multi-AZ deployment, read replicas in different regions
+- **Networking**: VPC with public/private subnets, NAT gateways, security groups
+- **Monitoring**: CloudWatch, X-Ray for distributed tracing
+- **DR Strategy**: Cross-region backups, RTO/RPO considerations, automated failover
+- **Security**: IAM roles, VPC endpoints, encryption at rest/transit
 
-      - name: Extract branch from tag
-        id: get_branch
-        run: |
-          tag_ref=$(git for-each-ref --format='%(refname:short) %(creatordate:iso)' refs/remotes/origin | grep ${{ github.ref_name }} | sort -k2 | tail -n1 | awk '{print $1}')
-          branch=$(echo "$tag_ref" | sed 's|origin/||')
-          if [[ "$branch" == "qa" ]]; then
-            echo "helm_branch=qabranch" >> $GITHUB_OUTPUT
-          else
-            echo "helm_branch=$branch" >> $GITHUB_OUTPUT
-          fi
+### Question 2: AWS Cost Optimization (Intermediate)
+**Question:** Your monthly AWS bill has increased by 40% over the last quarter. Walk me through your systematic approach to identify and reduce costs.
 
-      - name: Set variables
-        id: vars
-        run: |
-          echo "new_tag=${GITHUB_REF_NAME}" >> $GITHUB_OUTPUT
+**Expected Answer:**
+- **Analysis Tools**: Cost Explorer, AWS Budgets, Trusted Advisor, Cost and Usage Reports
+- **Resource Optimization**: Right-sizing EC2 instances, unused EBS volumes, idle load balancers
+- **Purchasing Options**: Reserved Instances, Savings Plans, Spot Instances for non-critical workloads
+- **Storage Optimization**: S3 lifecycle policies, Intelligent Tiering, EBS volume types
+- **Monitoring**: CloudWatch metrics, custom cost alerts, tagging strategy
+- **Governance**: Resource tagging, cost allocation, automated cleanup policies
 
-      - name: Checkout target Helm chart repo
-        uses: actions/checkout@v3
-        with:
-          repository: your-org-or-user/helm-chart-repo
-          token: ${{ secrets.TARGET_REPO_PAT }}
-          ref: ${{ steps.get_branch.outputs.helm_branch }}
-          path: helm-repo
+### Question 3: EKS Troubleshooting (Advanced)
+**Question:** Pods in your EKS cluster are failing to start with "ImagePullBackOff" errors, but the same images work in other clusters. How do you troubleshoot this?
 
-      - name: Install yq (Go binary version)
-        run: |
-          wget https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64 -O /usr/local/bin/yq
-          chmod +x /usr/local/bin/yq
-          yq --version
+**Expected Answer:**
+- **Initial Investigation**: `kubectl describe pod`, check events and logs
+- **Image Registry**: Verify ECR/registry permissions, authentication tokens
+- **Network Connectivity**: VPC endpoints, NAT gateway, security groups, NACLs
+- **Node Resources**: Check node capacity, disk space, compute resources
+- **IAM Permissions**: Service accounts, IRSA (IAM Roles for Service Accounts)
+- **DNS Resolution**: CoreDNS configuration, service discovery
+- **Tools**: `kubectl logs`, `kubectl get events`, AWS CloudTrail, VPC Flow Logs
 
-      - name: Update app-release-metadata.yaml
-        run: |
-          cd helm-repo
-          FILE="app-release-metadata.yaml"
+## Terraform Questions
 
-          current_latest=$(yq '.app.latest_version' $FILE)
+### Question 4: Terraform State Management (Advanced)
+**Question:** Explain the challenges with Terraform state in a team environment and design a robust state management strategy.
 
-          echo "Promoting $current_latest to last_successful_version"
-          echo "Setting new latest_version to ${{ steps.vars.outputs.new_tag }}"
+**Expected Answer:**
+- **Challenges**: State conflicts, sensitive data, backup/recovery, concurrent access
+- **Remote Backend**: S3 backend with DynamoDB for state locking
+- **State Structure**: 
+  ```hcl
+  terraform {
+    backend "s3" {
+      bucket         = "terraform-state-bucket"
+      key            = "env/prod/terraform.tfstate"
+      region         = "us-west-2"
+      dynamodb_table = "terraform-locks"
+      encrypt        = true
+    }
+  }
+  ```
+- **Best Practices**: Environment separation, state encryption, versioning, backup strategy
+- **Security**: IAM policies, least privilege access, state file encryption
+- **Disaster Recovery**: Cross-region replication, automated backups
 
-          yq -i '.app.last_successful_version = .app.latest_version' $FILE
-          yq -i ".app.latest_version = \"${{ steps.vars.outputs.new_tag }}\"" $FILE
+### Question 5: Terraform Modules (Intermediate)
+**Question:** Write a reusable Terraform module for creating a VPC with public and private subnets across multiple AZs.
 
-          echo "Updated YAML:"
-          cat $FILE
+**Expected Answer:**
+```hcl
+# modules/vpc/variables.tf
+variable "vpc_cidr" {
+  description = "CIDR block for VPC"
+  type        = string
+}
 
-      - name: Commit and push changes
-        run: |
-          cd helm-repo
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add app-release-metadata.yaml
-          git commit -m "Update latest_version to ${{ steps.vars.outputs.new_tag }}" || echo "No changes to commit"
-          git push origin ${{ steps.get_branch.outputs.helm_branch }}
+variable "environment" {
+  description = "Environment name"
+  type        = string
+}
+
+variable "availability_zones" {
+  description = "List of AZs"
+  type        = list(string)
+}
+
+# modules/vpc/main.tf
+resource "aws_vpc" "main" {
+  cidr_block           = var.vpc_cidr
+  enable_dns_hostnames = true
+  enable_dns_support   = true
+  
+  tags = {
+    Name        = "${var.environment}-vpc"
+    Environment = var.environment
+  }
+}
+
+resource "aws_subnet" "public" {
+  count             = length(var.availability_zones)
+  vpc_id            = aws_vpc.main.id
+  cidr_block        = cidrsubnet(var.vpc_cidr, 8, count.index)
+  availability_zone = var.availability_zones[count.index]
+  
+  map_public_ip_on_launch = true
+  
+  tags = {
+    Name = "${var.environment}-public-${count.index + 1}"
+    Type = "public"
+  }
+}
+
+resource "aws_subnet" "private" {
+  count             = length(var.availability_zones)
+  vpc_id            = aws_vpc.main.id
+  cidr_block        = cidrsubnet(var.vpc_cidr, 8, count.index + 10)
+  availability_zone = var.availability_zones[count.index]
+  
+  tags = {
+    Name = "${var.environment}-private-${count.index + 1}"
+    Type = "private"
+  }
+}
+```
+
+## Linux & System Administration
+
+### Question 6: Linux Performance Troubleshooting (Advanced)
+**Question:** A production Linux server is experiencing high load averages (>20) but CPU utilization shows only 30%. How do you investigate and resolve this?
+
+**Expected Answer:**
+- **Initial Assessment**: Check `uptime`, `top`, `htop` for load average vs CPU usage discrepancy
+- **I/O Investigation**: `iostat -x 1`, `iotop` to identify I/O bottlenecks
+- **Process Analysis**: `ps aux --sort=-%cpu`, check for processes in D state (uninterruptible sleep)
+- **Disk Performance**: `sar -d`, check disk queue lengths, await times
+- **Memory Issues**: `free -h`, `vmstat`, check for swapping
+- **Network**: `netstat -i`, `ss -tuln` for network I/O issues
+- **Solutions**: Optimize disk I/O, add more RAM, tune kernel parameters, identify blocking processes
+
+### Question 7: Linux Security Hardening (Intermediate)
+**Question:** List 10 essential security hardening steps for a production Linux server.
+
+**Expected Answer:**
+1. **Updates**: Regular security patches, automated updates for critical patches
+2. **User Management**: Disable root login, sudo configuration, strong password policies
+3. **SSH Security**: Key-based authentication, disable password auth, change default port
+4. **Firewall**: iptables/ufw rules, fail2ban for intrusion prevention
+5. **File Permissions**: Proper ownership, SUID/SGID review, umask settings
+6. **Logging**: centralized logging, log rotation, audit trails
+7. **Services**: Disable unnecessary services, regular service audits
+8. **Encryption**: Encrypt sensitive data, SSL/TLS certificates
+9. **Monitoring**: System monitoring, intrusion detection systems
+10. **Backup**: Regular backups, backup verification, disaster recovery testing
+
+## Scripting Questions
+
+### Question 8: Python DevOps Automation (Advanced)
+**Question:** Write a Python script that monitors AWS EC2 instances across multiple regions, identifies instances with high CPU utilization (>80%) for more than 10 minutes, and sends SNS notifications with instance details.
+
+**Expected Answer:**
+```python
+import boto3
+import json
+from datetime import datetime, timedelta
+from botocore.exceptions import ClientError
+
+class EC2Monitor:
+    def __init__(self):
+        self.ec2_regions = ['us-east-1', 'us-west-2', 'eu-west-1']
+        self.cpu_threshold = 80
+        self.time_period = 10  # minutes
+        
+    def get_high_cpu_instances(self, region):
+        """Get instances with high CPU utilization"""
+        ec2 = boto3.client('ec2', region_name=region)
+        cloudwatch = boto3.client('cloudwatch', region_name=region)
+        
+        try:
+            # Get running instances
+            response = ec2.describe_instances(
+                Filters=[{'Name': 'instance-state-name', 'Values': ['running']}]
+            )
+            
+            high_cpu_instances = []
+            
+            for reservation in response['Reservations']:
+                for instance in reservation['Instances']:
+                    instance_id = instance['InstanceId']
+                    
+                    # Get CPU metrics
+                    cpu_metrics = cloudwatch.get_metric_statistics(
+                        Namespace='AWS/EC2',
+                        MetricName='CPUUtilization',
+                        Dimensions=[{'Name': 'InstanceId', 'Value': instance_id}],
+                        StartTime=datetime.utcnow() - timedelta(minutes=self.time_period),
+                        EndTime=datetime.utcnow(),
+                        Period=300,  # 5-minute periods
+                        Statistics=['Average']
+                    )
+                    
+                    # Check if CPU is consistently high
+                    if cpu_metrics['Datapoints']:
+                        avg_cpu = sum(point['Average'] for point in cpu_metrics['Datapoints']) / len(cpu_metrics['Datapoints'])
+                        
+                        if avg_cpu > self.cpu_threshold:
+                            instance_info = {
+                                'InstanceId': instance_id,
+                                'InstanceType': instance['InstanceType'],
+                                'Region': region,
+                                'AvgCPU': round(avg_cpu, 2),
+                                'LaunchTime': instance['LaunchTime'].strftime('%Y-%m-%d %H:%M:%S')
+                            }
+                            
+                            # Get instance name from tags
+                            for tag in instance.get('Tags', []):
+                                if tag['Key'] == 'Name':
+                                    instance_info['Name'] = tag['Value']
+                                    break
+                            
+                            high_cpu_instances.append(instance_info)
+                            
+        except ClientError as e:
+            print(f"Error checking instances in {region}: {e}")
+            
+        return high_cpu_instances
+    
+    def send_sns_notification(self, instances):
+        """Send SNS notification for high CPU instances"""
+        if not instances:
+            return
+            
+        sns = boto3.client('sns', region_name='us-east-1')
+        
+        message = "High CPU Utilization Alert!\n\n"
+        message += "The following instances have CPU utilization > 80% for more than 10 minutes:\n\n"
+        
+        for instance in instances:
+            message += f"Instance ID: {instance['InstanceId']}\n"
+            message += f"Name: {instance.get('Name', 'N/A')}\n"
+            message += f"Type: {instance['InstanceType']}\n"
+            message += f"Region: {instance['Region']}\n"
+            message += f"Average CPU: {instance['AvgCPU']}%\n"
+            message += f"Launch Time: {instance['LaunchTime']}\n"
+            message += "-" * 40 + "\n"
+        
+        try:
+            response = sns.publish(
+                TopicArn='arn:aws:sns:us-east-1:123456789012:ec2-alerts',
+                Message=message,
+                Subject='EC2 High CPU Alert'
+            )
+            print(f"SNS notification sent: {response['MessageId']}")
+        except ClientError as e:
+            print(f"Error sending SNS notification: {e}")
+    
+    def monitor_instances(self):
+        """Main monitoring function"""
+        all_high_cpu_instances = []
+        
+        for region in self.ec2_regions:
+            print(f"Checking instances in region: {region}")
+            high_cpu_instances = self.get_high_cpu_instances(region)
+            all_high_cpu_instances.extend(high_cpu_instances)
+        
+        if all_high_cpu_instances:
+            print(f"Found {len(all_high_cpu_instances)} instances with high CPU")
+            self.send_sns_notification(all_high_cpu_instances)
+        else:
+            print("No instances with high CPU utilization found")
+
+if __name__ == "__main__":
+    monitor = EC2Monitor()
+    monitor.monitor_instances()
+```
+
+### Question 9: Shell Script for Log Analysis (Intermediate)
+**Question:** Write a bash script that analyzes Apache access logs to find the top 10 IP addresses with the most requests, identifies potential security threats (based on HTTP status codes), and generates a summary report.
+
+**Expected Answer:**
+```bash
+#!/bin/bash
+
+# Apache Log Analyzer Script
+# Usage: ./log_analyzer.sh /path/to/access.log
+
+LOG_FILE="$1"
+REPORT_FILE="security_report_$(date +%Y%m%d_%H%M%S).txt"
+
+# Check if log file exists
+if [[ ! -f "$LOG_FILE" ]]; then
+    echo "Error: Log file '$LOG_FILE' not found!"
+    exit 1
+fi
+
+echo "Analyzing Apache Access Log: $LOG_FILE"
+echo "Report will be saved to: $REPORT_FILE"
+
+# Initialize report
+cat > "$REPORT_FILE" << EOF
+Apache Access Log Security Analysis Report
+Generated on: $(date)
+Log file: $LOG_FILE
+Total requests: $(wc -l < "$LOG_FILE")
+
+================================
+EOF
+
+# Top 10 IP addresses by request count
+echo "TOP 10 IP ADDRESSES BY REQUEST COUNT:" >> "$REPORT_FILE"
+echo "=====================================" >> "$REPORT_FILE"
+awk '{print $1}' "$LOG_FILE" | sort | uniq -c | sort -nr | head -10 | \
+while read count ip; do
+    echo "IP: $ip - Requests: $count" >> "$REPORT_FILE"
+done
+
+echo "" >> "$REPORT_FILE"
+
+# HTTP Status Code Analysis
+echo "HTTP STATUS CODE ANALYSIS:" >> "$REPORT_FILE"
+echo "=========================" >> "$REPORT_FILE"
+awk '{print $9}' "$LOG_FILE" | grep -E '^[0-9]{3}$' | sort | uniq -c | sort -nr >> "$REPORT_FILE"
+
+echo "" >> "$REPORT_FILE"
+
+# Security Threat Analysis
+echo "POTENTIAL SECURITY THREATS:" >> "$REPORT_FILE"
+echo "===========================" >> "$REPORT_FILE"
+
+# 4xx errors (potential attacks)
+echo "4xx Client Errors (Potential Attacks):" >> "$REPORT_FILE"
+awk '$9 ~ /^4[0-9][0-9]$/ {print $1, $9, $7}' "$LOG_FILE" | sort | uniq -c | sort -nr | head -20 >> "$REPORT_FILE"
+
+echo "" >> "$REPORT_FILE"
+
+# Suspicious URLs
+echo "Suspicious URL Patterns:" >> "$REPORT_FILE"
+grep -E "(\.\.\/|\/etc\/passwd|\/bin\/|admin|login|wp-admin)" "$LOG_FILE" | \
+awk '{print $1, $7}' | sort | uniq -c | sort -nr | head -10 >> "$REPORT_FILE"
+
+echo "" >> "$REPORT_FILE"
+
+# Large request analysis (potential DoS)
+echo "IPs with >100 requests (Potential DoS):" >> "$REPORT_FILE"
+awk '{print $1}' "$LOG_FILE" | sort | uniq -c | sort -nr | awk '$1 > 100 {print "IP: " $2 " - Requests: " $1}' >> "$REPORT_FILE"
+
+echo "" >> "$REPORT_FILE"
+
+# User Agent Analysis
+echo "TOP USER AGENTS:" >> "$REPORT_FILE"
+echo "===============" >> "$REPORT_FILE"
+awk -F'"' '{print $6}' "$LOG_FILE" | sort | uniq -c | sort -nr | head -10 >> "$REPORT_FILE"
+
+# Summary statistics
+echo "" >> "$REPORT_FILE"
+echo "SUMMARY STATISTICS:" >> "$REPORT_FILE"
+echo "==================" >> "$REPORT_FILE"
+
+total_requests=$(wc -l < "$LOG_FILE")
+unique_ips=$(awk '{print $1}' "$LOG_FILE" | sort -u | wc -l)
+error_4xx=$(awk '$9 ~ /^4[0-9][0-9]$/' "$LOG_FILE" | wc -l)
+error_5xx=$(awk '$9 ~ /^5[0-9][0-9]$/' "$LOG_FILE" | wc -l)
+
+echo "Total Requests: $total_requests" >> "$REPORT_FILE"
+echo "Unique IP Addresses: $unique_ips" >> "$REPORT_FILE"
+echo "4xx Errors: $error_4xx" >> "$REPORT_FILE"
+echo "5xx Errors: $error_5xx" >> "$REPORT_FILE"
+echo "Error Rate: $(echo "scale=2; ($error_4xx + $error_5xx) * 100 / $total_requests" | bc)%" >> "$REPORT_FILE"
+
+echo "Analysis complete! Report saved to: $REPORT_FILE"
+
+# Optional: Display critical alerts to console
+critical_ips=$(awk '{print $1}' "$LOG_FILE" | sort | uniq -c | sort -nr | awk '$1 > 1000 {print $2}' | wc -l)
+if [ "$critical_ips" -gt 0 ]; then
+    echo "ALERT: Found $critical_ips IP(s) with >1000 requests - potential DoS attack!"
+fi
+```
+
+## Additional Questions for Deeper Assessment
+
+### Question 10: CI/CD Pipeline Design (Advanced)
+**Question:** Design a complete CI/CD pipeline for a microservices application using AWS native services. Include security scanning, testing strategies, and deployment patterns.
+
+**Expected Answer:**
+- **Source**: CodeCommit/GitHub with branch protection
+- **Build**: CodeBuild with multi-stage builds, dependency caching
+- **Testing**: Unit tests, integration tests, security scans (SAST/DAST)
+- **Artifacts**: ECR for container images, CodeArtifact for packages
+- **Deployment**: CodeDeploy with blue-green deployments
+- **Orchestration**: CodePipeline with approval gates
+- **Monitoring**: CloudWatch, X-Ray, custom metrics
+- **Security**: IAM roles, secrets management, vulnerability scanning
+- **Rollback**: Automated rollback triggers, database migration strategies
+
+### Evaluation Criteria:
+- **Architecture Thinking**: Can they design scalable, resilient solutions?
+- **Problem-Solving**: Systematic approach to troubleshooting
+- **Best Practices**: Security, cost optimization, maintainability
+- **Practical Experience**: Real-world scenarios and edge cases
+- **Communication**: Can they explain complex technical concepts clearly?
+- **Scripting Skills**: Clean, maintainable, and efficient code
