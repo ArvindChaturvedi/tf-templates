@@ -1,0 +1,85 @@
+# File: .github/workflows/cd-production.yml
+
+name: Deploy to Production
+
+on:
+  workflow_dispatch:
+    inputs:
+      jira_ticket:
+        description: "Jira ticket number (e.g. PROJ-123)"
+        required: true
+
+jobs:
+  deploy-production:
+    runs-on: ubuntu-latest
+    environment: production
+
+    steps:
+    - name: Validate Jira ticket
+      if: ${{ github.event.inputs.jira_ticket == '' }}
+      run: |
+        echo "❌ Jira ticket is required to deploy to production."
+        exit 1
+
+    - name: Checkout code
+      uses: actions/checkout@v3
+
+    - name: Set up tools
+      run: |
+        curl -sSL -o /usr/local/bin/argocd https://github.com/argoproj/argo-cd/releases/latest/download/argocd-linux-amd64
+        chmod +x /usr/local/bin/argocd
+
+    - name: Read metadata
+      id: meta
+      run: |
+        APP_LATEST=$(yq e '.latest_release_tag' app-release-metadata.yaml)
+        CHART_LATEST=$(yq e '.latest_release_tag' helm-release-metadata.yaml)
+        echo "app_latest=$APP_LATEST" >> $GITHUB_OUTPUT
+        echo "chart_latest=$CHART_LATEST" >> $GITHUB_OUTPUT
+
+    - name: Login to ArgoCD
+      env:
+        ARGOCD_SERVER: ${{ secrets.ARGOCD_PROD_SERVER }}
+        ARGOCD_TOKEN: ${{ secrets.ARGOCD_PROD_TOKEN }}
+      run: |
+        argocd login $ARGOCD_SERVER --token $ARGOCD_TOKEN --insecure
+
+    - name: Sync ArgoCD App
+      run: |
+        argocd app sync <prod-argocd-app-name>
+
+    - name: Start canary rollout at 30%
+      run: |
+        kubectl --context=${{ secrets.KUBE_CONTEXT_PROD }} argo rollouts set weight rollout/<prod-rollout-name> 30
+
+    - name: Trigger Prod QA tests at 30%
+      run: |
+        gh workflow run prod-tests.yml \
+          --repo <org>/<qa-repo> \
+          -f environment=production \
+          -f canary_weight=30
+        sleep 60
+
+    - name: Rollout to 60%
+      run: |
+        kubectl --context=${{ secrets.KUBE_CONTEXT_PROD }} argo rollouts set weight rollout/<prod-rollout-name> 60
+
+    - name: Trigger Prod QA tests at 60%
+      run: |
+        gh workflow run prod-tests.yml \
+          --repo <org>/<qa-repo> \
+          -f environment=production \
+          -f canary_weight=60
+        sleep 60
+
+    - name: Final Promote
+      run: |
+        kubectl --context=${{ secrets.KUBE_CONTEXT_PROD }} argo rollouts promote rollout/<prod-rollout-name>
+
+    - name: Notify Slack
+      env:
+        SLACK_WEBHOOK: ${{ secrets.SLACK_WEBHOOK_URL }}
+      run: |
+        curl -X POST -H 'Content-type: application/json' \
+          --data '{"text":"🚀 *Production* deployment `${{ steps.meta.outputs.chart_latest }}` succeeded. Approved via Jira ticket `${{ github.event.inputs.jira_ticket }}`"}' \
+          $SLACK_WEBHOOK
