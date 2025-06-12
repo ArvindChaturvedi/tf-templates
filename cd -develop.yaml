@@ -1,0 +1,114 @@
+# File: .github/workflows/cd-develop.yml
+
+name: Deploy to Develop
+
+on:
+  push:
+    paths:
+      - 'app-release-metadata.yaml'
+      - 'helm-release-metadata.yaml'
+    branches:
+      - develop
+      - main
+
+jobs:
+  deploy-develop:
+    runs-on: ubuntu-latest
+    environment: develop
+
+    steps:
+    # --- 1. Checkout and setup ---
+    - name: Checkout code
+      uses: actions/checkout@v3
+
+    - name: Set up tools
+      run: |
+        curl -sSL -o /usr/local/bin/argocd https://github.com/argoproj/argo-cd/releases/latest/download/argocd-linux-amd64
+        chmod +x /usr/local/bin/argocd
+
+    - name: Configure Git
+      run: |
+        git config user.name github-actions
+        git config user.email github-actions@users.noreply.github.com
+
+    # --- 2. Read and update metadata ---
+    - name: Read metadata
+      id: meta
+      run: |
+        APP_PREV=$(yq e '.previous_release_tag' app-release-metadata.yaml)
+        APP_LATEST=$(yq e '.latest_release_tag' app-release-metadata.yaml)
+        CHART_PREV=$(yq e '.previous_release_tag' helm-release-metadata.yaml)
+        CHART_LATEST=$(yq e '.latest_release_tag' helm-release-metadata.yaml)
+        echo "app_prev=$APP_PREV"  >> $GITHUB_OUTPUT
+        echo "app_latest=$APP_LATEST" >> $GITHUB_OUTPUT
+        echo "chart_prev=$CHART_PREV"  >> $GITHUB_OUTPUT
+        echo "chart_latest=$CHART_LATEST" >> $GITHUB_OUTPUT
+
+    - name: Update Chart and Values
+      if: steps.meta.outputs.app_prev != steps.meta.outputs.app_latest || steps.meta.outputs.chart_prev != steps.meta.outputs.chart_latest
+      run: |
+        # Update values.yaml with latest image tag
+        yq e -i ".image.tag = \"${{ steps.meta.outputs.app_latest }}\"" values.yaml
+        yq e -i ".previous_release_tag = \"${{ steps.meta.outputs.app_latest }}\"" app-release-metadata.yaml
+
+        # Update Chart.yaml with latest chart version
+        yq e -i ".version = \"${{ steps.meta.outputs.chart_latest }}\"" Chart.yaml
+        yq e -i ".previous_release_tag = \"${{ steps.meta.outputs.chart_latest }}\"" helm-release-metadata.yaml
+
+        git add values.yaml Chart.yaml app-release-metadata.yaml helm-release-metadata.yaml
+        git commit -m "chore(develop): update app=${{ steps.meta.outputs.app_latest }}, chart=${{ steps.meta.outputs.chart_latest }}"
+        git push
+
+    # --- 3. ArgoCD sync + Canary rollout ---
+    - name: Login to ArgoCD
+      env:
+        ARGOCD_SERVER: ${{ secrets.ARGOCD_DEV_SERVER }}
+        ARGOCD_TOKEN: ${{ secrets.ARGOCD_DEV_TOKEN }}
+      run: |
+        argocd login $ARGOCD_SERVER --token $ARGOCD_TOKEN --insecure
+
+    - name: Sync with ArgoCD
+      run: |
+        argocd app sync <dev-argocd-app-name>
+
+    - name: Initiate canary rollout to 30%
+      run: |
+        kubectl --context=${{ secrets.KUBE_CONTEXT_DEV }} argo rollouts set weight rollout/<dev-rollout-name> 30
+
+    # --- 4. Run QA automation pipeline from another repo ---
+    - name: Trigger QA pipeline
+      run: |
+        gh workflow run qa-tests.yml \
+          --repo <org>/<qa-repo> \
+          -f environment=develop \
+          -f canary_weight=30
+
+    - name: Wait for QA test result
+      run: |
+        echo "Waiting for QA workflow result..."
+        sleep 60  # or implement polling if you prefer
+
+    - name: Proceed to 60% traffic if QA success
+      run: |
+        kubectl --context=${{ secrets.KUBE_CONTEXT_DEV }} argo rollouts set weight rollout/<dev-rollout-name> 60
+
+    - name: Trigger QA again at 60%
+      run: |
+        gh workflow run qa-tests.yml \
+          --repo <org>/<qa-repo> \
+          -f environment=develop \
+          -f canary_weight=60
+        sleep 60
+
+    - name: Proceed to 100% traffic if QA success
+      run: |
+        kubectl --context=${{ secrets.KUBE_CONTEXT_DEV }} argo rollouts promote rollout/<dev-rollout-name>
+
+    # --- 5. Notify Slack ---
+    - name: Notify Slack
+      env:
+        SLACK_WEBHOOK: ${{ secrets.SLACK_WEBHOOK_URL }}
+      run: |
+        curl -X POST -H 'Content-type: application/json' \
+          --data '{"text":"✅ *Develop* deployment `${{ steps.meta.outputs.chart_latest }}` successful."}' \
+          $SLACK_WEBHOOK
