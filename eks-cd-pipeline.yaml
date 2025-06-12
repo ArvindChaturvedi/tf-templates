@@ -1,0 +1,227 @@
+# ================================
+# cd-develop.yaml
+# ================================
+
+name: CD Develop Pipeline
+
+on:
+  push:
+    paths:
+      - 'helm-release-metadata.yaml'
+      - 'app-release-metadata.yaml'
+    branches:
+      - develop
+
+jobs:
+  deploy-develop:
+    runs-on: ubuntu-latest
+    env:
+      ENV: develop
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v3
+
+      - name: Set up GH CLI
+        uses: cli/cli@v2
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Trigger Develop QA Automation Tests
+        run: |
+          gh workflow run develop-tests.yml --repo <org>/<qa-repo> -f environment=develop -f weight=30
+          sleep 10
+
+      - name: Wait for QA test run to complete
+        id: poll-test
+        run: |
+          echo "⏳ Waiting for QA test completion..."
+          for i in {1..30}; do
+            RUN_ID=$(gh run list --workflow="develop-tests.yml" --limit 1 --json databaseId -q '.[0].databaseId' --repo <org>/<qa-repo>)
+            STATUS=$(gh run view $RUN_ID --repo <org>/<qa-repo> --json conclusion -q '.conclusion')
+            echo "Attempt $i: QA Test Status: $STATUS"
+            if [[ "$STATUS" == "success" ]]; then
+              echo "passed=true" >> $GITHUB_OUTPUT
+              break
+            elif [[ "$STATUS" == "failure" ]]; then
+              echo "passed=false" >> $GITHUB_OUTPUT
+              break
+            fi
+            sleep 30
+          done
+
+      - name: Rollback if QA failed
+        if: steps.poll-test.outputs.passed == 'false'
+        run: |
+          LAST_CHART=$(yq e '.last_successful_release' helm-release-metadata.yaml)
+          yq e -i ".version = \"$LAST_CHART\"" Chart.yaml
+          git config user.email "ci@github.com"
+          git config user.name "github-actions"
+          git commit -am "rollback: restoring Helm chart to $LAST_CHART"
+          git push
+
+      - name: Wait for ArgoCD Image Updater sync
+        run: |
+          echo "Waiting for ArgoCD to sync latest image version..."
+          sleep 90
+
+      - name: Trigger Argo Rollout Promotion
+        if: steps.poll-test.outputs.passed == 'true'
+        run: |
+          kubectl --context=${{ secrets.KUBE_CONTEXT_DEVELOP }} argo rollouts promote rollout/<rollout-name>
+
+      - name: Slack Notify
+        if: steps.poll-test.outputs.passed == 'true'
+        run: |
+          curl -X POST -H 'Content-type: application/json' --data '{"text":"✅ Deployment to *Develop* environment succeeded."}' ${{ secrets.SLACK_WEBHOOK_URL }}
+
+
+# ================================
+# cd-qa.yaml
+# ================================
+
+name: CD QA Pipeline
+
+on:
+  push:
+    paths:
+      - 'helm-release-metadata.yaml'
+      - 'app-release-metadata.yaml'
+    branches:
+      - qa
+
+jobs:
+  deploy-qa:
+    runs-on: ubuntu-latest
+    env:
+      ENV: qa
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v3
+
+      - name: Set up GH CLI
+        uses: cli/cli@v2
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Trigger QA Automation Tests
+        run: |
+          gh workflow run qa-tests.yml --repo <org>/<qa-repo> -f environment=qa -f weight=30
+          sleep 10
+
+      - name: Wait for QA test run to complete
+        id: poll-test
+        run: |
+          for i in {1..30}; do
+            RUN_ID=$(gh run list --workflow="qa-tests.yml" --limit 1 --json databaseId -q '.[0].databaseId' --repo <org>/<qa-repo>)
+            STATUS=$(gh run view $RUN_ID --repo <org>/<qa-repo> --json conclusion -q '.conclusion')
+            if [[ "$STATUS" == "success" ]]; then
+              echo "passed=true" >> $GITHUB_OUTPUT
+              break
+            elif [[ "$STATUS" == "failure" ]]; then
+              echo "passed=false" >> $GITHUB_OUTPUT
+              break
+            fi
+            sleep 30
+          done
+
+      - name: Rollback if QA failed
+        if: steps.poll-test.outputs.passed == 'false'
+        run: |
+          LAST_CHART=$(yq e '.last_successful_release' helm-release-metadata.yaml)
+          yq e -i ".version = \"$LAST_CHART\"" Chart.yaml
+          git config user.email "ci@github.com"
+          git config user.name "github-actions"
+          git commit -am "rollback: restoring Helm chart to $LAST_CHART"
+          git push
+
+      - name: Wait for ArgoCD Image Updater sync
+        run: sleep 90
+
+      - name: Promote Rollout
+        if: steps.poll-test.outputs.passed == 'true'
+        run: |
+          kubectl --context=${{ secrets.KUBE_CONTEXT_QA }} argo rollouts promote rollout/<rollout-name>
+
+      - name: Slack Notify
+        if: steps.poll-test.outputs.passed == 'true'
+        run: |
+          curl -X POST -H 'Content-type: application/json' --data '{"text":"✅ Deployment to *QA* environment succeeded."}' ${{ secrets.SLACK_WEBHOOK_URL }}
+
+
+# ================================
+# cd-production.yaml
+# ================================
+
+name: CD Production Pipeline
+
+on:
+  workflow_dispatch:
+    inputs:
+      jira_ticket:
+        description: 'Enter a valid Jira ticket number to proceed'
+        required: true
+
+jobs:
+  deploy-production:
+    runs-on: ubuntu-latest
+    env:
+      ENV: production
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v3
+
+      - name: Validate Jira Ticket
+        run: |
+          echo "Validating JIRA ticket: ${{ github.event.inputs.jira_ticket }}"
+          # Add Jira validation integration here if needed
+
+      - name: Set up GH CLI
+        uses: cli/cli@v2
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Trigger QA Tests
+        run: |
+          gh workflow run production-tests.yml --repo <org>/<qa-repo> -f environment=production -f weight=30
+
+      - name: Wait for QA test run to complete
+        id: poll-test
+        run: |
+          for i in {1..30}; do
+            RUN_ID=$(gh run list --workflow="production-tests.yml" --limit 1 --json databaseId -q '.[0].databaseId' --repo <org>/<qa-repo>)
+            STATUS=$(gh run view $RUN_ID --repo <org>/<qa-repo> --json conclusion -q '.conclusion')
+            if [[ "$STATUS" == "success" ]]; then
+              echo "passed=true" >> $GITHUB_OUTPUT
+              break
+            elif [[ "$STATUS" == "failure" ]]; then
+              echo "passed=false" >> $GITHUB_OUTPUT
+              break
+            fi
+            sleep 30
+          done
+
+      - name: Rollback if QA failed
+        if: steps.poll-test.outputs.passed == 'false'
+        run: |
+          LAST_CHART=$(yq e '.last_successful_release' helm-release-metadata.yaml)
+          yq e -i ".version = \"$LAST_CHART\"" Chart.yaml
+          git config user.email "ci@github.com"
+          git config user.name "github-actions"
+          git commit -am "rollback: restoring Helm chart to $LAST_CHART"
+          git push
+
+      - name: Wait for ArgoCD Image Updater sync
+        run: sleep 90
+
+      - name: Promote Rollout
+        if: steps.poll-test.outputs.passed == 'true'
+        run: |
+          kubectl --context=${{ secrets.KUBE_CONTEXT_PRODUCTION }} argo rollouts promote rollout/<rollout-name>
+
+      - name: Slack Notify
+        if: steps.poll-test.outputs.passed == 'true'
+        run: |
+          curl -X POST -H 'Content-type: application/json' --data '{"text":"✅ Deployment to *Production* environment succeeded."}' ${{ secrets.SLACK_WEBHOOK_URL }}
