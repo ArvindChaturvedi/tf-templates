@@ -1,0 +1,100 @@
+# EXAMPLE: cd-develop.yaml
+name: CD Deploy - Develop
+
+on:
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    env:
+      ENV: develop
+      APP_NAME: app1
+
+    steps:
+      - name: Checkout Helm repo
+        uses: actions/checkout@v4
+
+      - name: Set up AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.DEV_AWS_ROLE_ARN }}
+          aws-region: us-east-1
+
+      - name: Update kubeconfig for EKS cluster
+        run: aws eks update-kubeconfig --region us-east-1 --name develop-cluster
+
+      - name: Install Argo Rollouts CLI
+        run: |
+          curl -sLO https://github.com/argoproj/argo-rollouts/releases/latest/download/kubectl-argo-rollouts-linux-amd64
+          chmod +x kubectl-argo-rollouts-linux-amd64
+          mv kubectl-argo-rollouts-linux-amd64 /usr/local/bin/kubectl-argo-rollouts
+
+      - name: Wait for ArgoCD Image Updater to sync
+        run: |
+          echo "Waiting for ArgoCD Image Updater to apply new image tag..."
+          sleep 90
+
+      - name: Get rollout name from Helm chart
+        run: echo "ROLLOUT_NAME=$(yq '.app.name' charts/${{ env.APP_NAME }}/values.yaml)" >> $GITHUB_ENV
+
+      - name: Authenticate gh CLI
+        run: echo "${{ secrets.GH_PAT_FOR_E2E }}" | gh auth login --with-token
+
+      - name: Canary rollout with QA checks
+        run: |
+          for weight in 30 60 100; do
+            echo "Promoting rollout to ${weight}%"
+            kubectl argo rollouts promote $ROLLOUT_NAME -n $ENV || exit 1
+
+            echo "Waiting for rollout to stabilize..."
+            kubectl argo rollouts status $ROLLOUT_NAME -n $ENV --watch || exit 1
+
+            echo "Triggering E2E tests"
+            gh workflow run aggregate-all-e2e.yml \
+              --repo my-org/tests-e2e \
+              --field environment=$ENV \
+              --field app=${{ env.APP_NAME }}
+
+            echo "Polling for test result..."
+            attempt=0
+            max_attempts=20
+            sleep_interval=30
+            while [ $attempt -lt $max_attempts ]; do
+              run_info=$(gh run list --repo my-org/tests-e2e --workflow aggregate-all-e2e.yml --json conclusion,databaseId,status -q ".[0]")
+              conclusion=$(echo "$run_info" | jq -r '.conclusion')
+              status=$(echo "$run_info" | jq -r '.status')
+              run_id=$(echo "$run_info" | jq -r '.databaseId')
+
+              if [ "$status" = "completed" ]; then
+                break
+              fi
+              echo "Waiting for test run to complete... ($attempt/$max_attempts)"
+              sleep $sleep_interval
+              attempt=$((attempt + 1))
+            done
+
+            if [ "$conclusion" != "success" ]; then
+              echo "Tests failed. Initiating rollback."
+              git checkout main
+              yq e -i '.latest_release_tag = .last_successful_release_tag' app-release-metadata.yaml
+              yq e -i '.latest_release_tag = .last_successful_release_tag' helm-release-metadata.yaml
+              git commit -am "Rollback to last successful release"
+              git push
+              exit 1
+            fi
+          done
+
+      - name: Notify on Slack
+        uses: slackapi/slack-github-action@v1.24.0
+        with:
+          payload: >
+            {
+              "text": ":rocket: Deployment *${{ env.APP_NAME }}* to *${{ env.ENV }}* succeeded!\n\n✅ Tests passed at all traffic increments.\n🔍 [View Test Report](https://my-test-reporting.com/reports/${{ env.APP_NAME }}/${{ env.ENV }})"
+            }
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+
+# Repeat structure above for cd-qa.yaml and cd-production.yaml
+# In cd-production.yaml, add 'jira_ticket' as required workflow_dispatch input
+# And validate the format of the ticket before proceeding
