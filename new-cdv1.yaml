@@ -1,0 +1,104 @@
+# cd-develop.yaml
+name: CD Deploy - Develop
+
+on:
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    env:
+      ENV: develop
+      APP_NAME: app1
+
+    steps:
+      - name: Checkout Helm chart repo
+        uses: actions/checkout@v4
+
+      - name: Set up AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.DEV_AWS_ROLE_ARN }}
+          aws-region: us-east-1
+
+      - name: Update kubeconfig for EKS cluster
+        run: aws eks update-kubeconfig --region us-east-1 --name develop-cluster
+
+      - name: Install Argo Rollouts CLI
+        run: |
+          curl -sLO https://github.com/argoproj/argo-rollouts/releases/latest/download/kubectl-argo-rollouts-linux-amd64
+          chmod +x kubectl-argo-rollouts-linux-amd64
+          mv kubectl-argo-rollouts-linux-amd64 /usr/local/bin/kubectl-argo-rollouts
+
+      - name: Parse latest release version
+        id: parse
+        run: |
+          APP_VERSION=$(yq '.latest_release_tag' metadata-files/app-release-metadata.yaml)
+          echo "APP_VERSION=$APP_VERSION" >> $GITHUB_ENV
+
+      - name: Patch ArgoCD Application image tag
+        run: |
+          kubectl -n argocd patch application ${{ env.APP_NAME }} \
+            --type merge \
+            -p '{"spec": {"source": {"helm": {"parameters": [{"name": "image.tag", "value": "'"$APP_VERSION"'"}]}}}}'
+
+      - name: Get rollout name from Helm chart
+        run: echo "ROLLOUT_NAME=$(yq '.app.name' charts/${{ env.APP_NAME }}/values.yaml)" >> $GITHUB_ENV
+
+      - name: Promote rollout to 30%
+        run: |
+          kubectl argo rollouts promote $ROLLOUT_NAME -n $ENV || exit 1
+
+      - name: Wait for rollout to stabilize at 30%
+        run: |
+          kubectl argo rollouts status $ROLLOUT_NAME -n $ENV --watch || exit 1
+
+      - name: Manual approval before proceeding to 60%
+        uses: hmarr/auto-approve-action@v3
+        if: ${{ always() }}
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Wait for manual approval
+        uses: trstringer/manual-approval@v1
+        with:
+          secret: ${{ secrets.GITHUB_TOKEN }}
+          approvers: arvind, reviewer2
+          minimum-approvals: 1
+          issue-title: "Approval required to proceed to 60% rollout"
+          issue-body: "Run QA tests manually and approve this step to continue deployment to 60%"
+
+      - name: Promote rollout to 60%
+        run: |
+          kubectl argo rollouts promote $ROLLOUT_NAME -n $ENV || exit 1
+
+      - name: Wait for rollout to stabilize at 60%
+        run: |
+          kubectl argo rollouts status $ROLLOUT_NAME -n $ENV --watch || exit 1
+
+      - name: Manual approval before proceeding to 100%
+        uses: trstringer/manual-approval@v1
+        with:
+          secret: ${{ secrets.GITHUB_TOKEN }}
+          approvers: arvind, reviewer2
+          minimum-approvals: 1
+          issue-title: "Approval required to proceed to 100% rollout"
+          issue-body: "Validate 60% rollout and approve to proceed to full deployment"
+
+      - name: Promote rollout to 100%
+        run: |
+          kubectl argo rollouts promote $ROLLOUT_NAME -n $ENV || exit 1
+
+      - name: Wait for rollout to stabilize at 100%
+        run: |
+          kubectl argo rollouts status $ROLLOUT_NAME -n $ENV --watch || exit 1
+
+      - name: Notify on Slack
+        uses: slackapi/slack-github-action@v1.24.0
+        with:
+          payload: >
+            {
+              "text": ":rocket: Deployment *${{ env.APP_NAME }}* to *${{ env.ENV }}* succeeded!\n\n✅ Approved manually at each phase.\n🔍 [View Test Report](https://my-test-reporting.com/reports/${{ env.APP_NAME }}/${{ env.ENV }})"
+            }
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
