@@ -66,12 +66,12 @@ jobs:
           kubectl argo rollouts status $ROLLOUT_NAME -n $ENV --watch || exit 1
 
       - name: Wait for manual approval to continue to 60%
-        uses: hmarr/auto-approve-action@v3
-        with:
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-        if: always()
+        environment:
+          name: feature-approval
+          url: https://your-app-url/ # Optional: link to deployed app for testing
 
       - name: Promote to 60% traffic
+        if: ${{ !cancelled() }}
         run: |
           echo "Promoting rollout to 60%"
           kubectl argo rollouts promote $ROLLOUT_NAME -n $ENV || exit 1
@@ -79,24 +79,49 @@ jobs:
           kubectl argo rollouts status $ROLLOUT_NAME -n $ENV --watch || exit 1
 
       - name: Wait for manual approval to continue to 100%
-        uses: hmarr/auto-approve-action@v3
-        with:
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-        if: always()
+        if: ${{ !cancelled() }}
+        environment:
+          name: feature-approval
+          url: https://your-app-url/ # Optional: link to deployed app for testing
 
       - name: Promote to 100% traffic
+        if: ${{ !cancelled() }}
         run: |
           echo "Promoting rollout to 100%"
           kubectl argo rollouts promote $ROLLOUT_NAME -n $ENV || exit 1
           echo "Waiting for rollout to stabilize..."
           kubectl argo rollouts status $ROLLOUT_NAME -n $ENV --watch || exit 1
 
-      - name: Notify on Slack
-        uses: slackapi/slack-github-action@v1.24.0
-        with:
-          payload: >
-            {
-              "text": ":rocket: Feature rollout for *${{ env.APP_NAME }}* to *${{ env.ENV }}* complete! Promoted to 100% traffic after manual approval."
-            }
-        env:
-          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+      - name: Rollback to last successful version
+        if: ${{ cancelled() }}
+        run: |
+          echo "Rolling back to last successful version..."
+          export LAST_SUCCESSFUL_TAG=$(yq '.last_successful_version' metadata-files/app-release-metadata.yaml)
+          yq e -i '.app1.image.tag = strenv(LAST_SUCCESSFUL_TAG)' charts/app1/values.yaml
+          git config user.name "GitHub Actions"
+          git config user.email "actions@github.com"
+          git checkout ${{ github.ref_name }}
+          git commit -am "Rollback app1 image tag to $LAST_SUCCESSFUL_TAG"
+          git push origin ${{ github.ref_name }}
+
+      # - name: Notify on Slack
+      #   if: ${{ !cancelled() }}
+      #   uses: slackapi/slack-github-action@v1.24.0
+      #   with:
+      #     payload: >
+      #       {
+      #         "text": ":rocket: Feature rollout for *${{ env.APP_NAME }}* to *${{ env.ENV }}* complete! Promoted to 100% traffic after manual approval."
+      #       }
+      #   env:
+      #     SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+
+      # - name: Notify on Slack (Rollback)
+      #   if: ${{ cancelled() }}
+      #   uses: slackapi/slack-github-action@v1.24.0
+      #   with:
+      #     payload: >
+      #       {
+      #         "text": ":warning: Rollback triggered for *${{ env.APP_NAME }}* in *${{ env.ENV }}*. Deployment reverted to last successful version after manual rejection."
+      #       }
+      #   env:
+      #     SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
