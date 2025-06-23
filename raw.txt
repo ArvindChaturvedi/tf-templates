@@ -1,0 +1,3 @@
+kubectl -n argocd patch application <APP_NAME> \
+  --type json \
+  -p='[{"op": "remove", "path": "/spec/source/helm/parameters/0"}]'
