@@ -8,12 +8,14 @@ on:
       - 'feature/**'
 
 jobs:
-  deploy:
+  deploy-30:
     runs-on: ubuntu-latest
     env:
       ENV: feature
       APP_NAME: app1
-
+    outputs:
+      latest_tag: ${{ steps.metadata.outputs.latest_tag }}
+      rollout_name: ${{ steps.get_rollout_name.outputs.rollout_name }}
     steps:
       - name: Checkout branch
         uses: actions/checkout@v4
@@ -41,11 +43,13 @@ jobs:
         id: metadata
         run: |
           export LATEST_TAG=$(yq '.latest_release_tag' metadata-files/app-release-metadata.yaml)
-          echo "LATEST_TAG=$LATEST_TAG" >> $GITHUB_ENV
+          echo "latest_tag=$LATEST_TAG" >> $GITHUB_OUTPUT
 
       - name: Patch values.yaml with latest image tag
         run: |
           yq e -i '.app1.image.tag = strenv(LATEST_TAG)' charts/app1/values.yaml
+        env:
+          LATEST_TAG: ${{ steps.metadata.outputs.latest_tag }}
 
       - name: Commit and push updated values.yaml
         run: |
@@ -54,50 +58,132 @@ jobs:
           git checkout ${{ github.ref_name }}
           git commit -am "Update app1 image tag to $LATEST_TAG"
           git push origin ${{ github.ref_name }}
+        env:
+          LATEST_TAG: ${{ steps.metadata.outputs.latest_tag }}
 
       - name: Get rollout name from Helm chart
-        run: echo "ROLLOUT_NAME=$(yq '.app1.name' charts/app1/values.yaml)" >> $GITHUB_ENV
+        id: get_rollout_name
+        run: |
+          ROLLOUT_NAME=$(yq '.app1.name' charts/app1/values.yaml)
+          echo "rollout_name=$ROLLOUT_NAME" >> $GITHUB_OUTPUT
 
       - name: Promote to 30% traffic
         run: |
           echo "Promoting rollout to 30%"
-          kubectl argo rollouts promote $ROLLOUT_NAME -n $ENV || exit 1
+          kubectl argo rollouts promote ${{ steps.get_rollout_name.outputs.rollout_name }} -n $ENV || exit 1
           echo "Waiting for rollout to stabilize..."
-          kubectl argo rollouts status $ROLLOUT_NAME -n $ENV --watch || exit 1
+          kubectl argo rollouts status ${{ steps.get_rollout_name.outputs.rollout_name }} -n $ENV --watch || exit 1
 
-      - name: Wait for manual approval to continue to 60%
-        run: echo "Waiting for approval..." # Manual approval should be handled via environment protection rules in GitHub UI
+  approve-60:
+    needs: deploy-30
+    runs-on: ubuntu-latest
+    steps:
+      - name: Wait for manual approval to promote to 60%
+        uses: tfstringer/manual-approval@v1
+        with:
+          secret: ${{ github.token }}
+          approvers: user1,user2  # GitHub usernames allowed to approve
+          instructions: "Approve to continue rollout to 60% traffic."
 
+  deploy-60:
+    needs: approve-60
+    if: ${{ needs.approve-60.outputs.approved == 'true' }}
+    runs-on: ubuntu-latest
+    env:
+      ENV: feature
+      ROLLOUT_NAME: ${{ needs.deploy-30.outputs.rollout_name }}
+    steps:
+      - name: Checkout branch
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.ref_name }}
+      - name: Install yq and kubectl-argo-rollouts
+        run: |
+          sudo wget https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64 -O /usr/bin/yq
+          sudo chmod +x /usr/bin/yq
+          curl -sLO https://github.com/argoproj/argo-rollouts/releases/latest/download/kubectl-argo-rollouts-linux-amd64
+          chmod +x kubectl-argo-rollouts-linux-amd64
+          sudo mv kubectl-argo-rollouts-linux-amd64 /usr/local/bin/kubectl-argo-rollouts
       - name: Promote to 60% traffic
-        if: ${{ !cancelled() }}
         run: |
           echo "Promoting rollout to 60%"
           kubectl argo rollouts promote $ROLLOUT_NAME -n $ENV || exit 1
           echo "Waiting for rollout to stabilize..."
           kubectl argo rollouts status $ROLLOUT_NAME -n $ENV --watch || exit 1
 
-      - name: Wait for manual approval to continue to 100%
-        if: ${{ !cancelled() }}
-        run: echo "Waiting for approval..." # Manual approval should be handled via environment protection rules in GitHub UI
+  approve-100:
+    needs: deploy-60
+    runs-on: ubuntu-latest
+    steps:
+      - name: Wait for manual approval to promote to 100%
+        uses: tfstringer/manual-approval@v1
+        with:
+          secret: ${{ github.token }}
+          approvers: user1,user2
+          instructions: "Approve to continue rollout to 100% traffic."
 
+  deploy-100:
+    needs: approve-100
+    if: ${{ needs.approve-100.outputs.approved == 'true' }}
+    runs-on: ubuntu-latest
+    env:
+      ENV: feature
+      ROLLOUT_NAME: ${{ needs.deploy-30.outputs.rollout_name }}
+    steps:
+      - name: Checkout branch
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.ref_name }}
+      - name: Install yq and kubectl-argo-rollouts
+        run: |
+          sudo wget https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64 -O /usr/bin/yq
+          sudo chmod +x /usr/bin/yq
+          curl -sLO https://github.com/argoproj/argo-rollouts/releases/latest/download/kubectl-argo-rollouts-linux-amd64
+          chmod +x kubectl-argo-rollouts-linux-amd64
+          sudo mv kubectl-argo-rollouts-linux-amd64 /usr/local/bin/kubectl-argo-rollouts
       - name: Promote to 100% traffic
-        if: ${{ !cancelled() }}
         run: |
           echo "Promoting rollout to 100%"
           kubectl argo rollouts promote $ROLLOUT_NAME -n $ENV || exit 1
           echo "Waiting for rollout to stabilize..."
           kubectl argo rollouts status $ROLLOUT_NAME -n $ENV --watch || exit 1
 
+  rollback:
+    if: ${{ needs.approve-60.outputs.approved == 'false' || needs.approve-100.outputs.approved == 'false' }}
+    runs-on: ubuntu-latest
+    env:
+      ENV: feature
+      APP_NAME: app1
+    steps:
+      - name: Checkout branch
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.ref_name }}
+      - name: Install yq
+        run: |
+          sudo wget https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64 -O /usr/bin/yq
+          sudo chmod +x /usr/bin/yq
       - name: Rollback to last successful version
-        if: ${{ cancelled() }}
         run: |
           echo "Rolling back to last successful version..."
-          export LAST_SUCCESSFUL_TAG=$(yq '.last_successful_version' metadata-files/app-release-metadata.yaml)
+          # Extract current values
+          export LAST_SUCCESSFUL_TAG=$(yq '.app.last_successful_version' metadata-files/app-release-metadata.yaml)
+          export LATEST_VERSION=$(yq '.app.latest_version' metadata-files/app-release-metadata.yaml)
+          export LAST_SUCCESSFUL_VERSION=$(yq '.app.last_successful_version' metadata-files/app-release-metadata.yaml)
+          # Compute previous successful version (decrement patch version)
+          export PREV_SUCCESSFUL_VERSION=$(echo $LAST_SUCCESSFUL_VERSION | awk -F. '{patch=$3-1; print $1"."$2"."patch}' | sed 's/\"//g')
+          # Update values.yaml for rollback
           yq e -i '.app1.image.tag = strenv(LAST_SUCCESSFUL_TAG)' charts/app1/values.yaml
+          # Update metadata file
+          yq e -i '.app.last_failed_version = strenv(LATEST_VERSION)' metadata-files/app-release-metadata.yaml
+          yq e -i '.app.latest_version = strenv(LAST_SUCCESSFUL_VERSION)' metadata-files/app-release-metadata.yaml
+          yq e -i '.app.last_successful_version = strenv(PREV_SUCCESSFUL_VERSION)' metadata-files/app-release-metadata.yaml
+          # Commit and push both files
           git config user.name "GitHub Actions"
           git config user.email "actions@github.com"
           git checkout ${{ github.ref_name }}
-          git commit -am "Rollback app1 image tag to $LAST_SUCCESSFUL_TAG"
+          git add charts/app1/values.yaml metadata-files/app-release-metadata.yaml
+          git commit -m "Rollback app1 image tag to $LAST_SUCCESSFUL_TAG and update metadata after failed deployment of $LATEST_VERSION"
           git push origin ${{ github.ref_name }}
 
       # - name: Notify on Slack
