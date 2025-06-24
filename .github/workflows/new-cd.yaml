@@ -20,14 +20,14 @@ jobs:
         with:
           ref: ${{ github.ref_name }}
 
-      - name: Set up AWS credentials
-        uses: aws-actions/configure-aws-credentials@v4
-        with:
-          role-to-assume: ${{ secrets.FEATURE_AWS_ROLE_ARN }}
-          aws-region: us-east-1
+      # - name: Set up AWS credentials
+      #   uses: aws-actions/configure-aws-credentials@v4
+      #   with:
+      #     role-to-assume: ${{ secrets.FEATURE_AWS_ROLE_ARN }}
+      #     aws-region: us-east-1
 
-      - name: Update kubeconfig for EKS cluster
-        run: aws eks update-kubeconfig --region us-east-1 --name feature-cluster
+      # - name: Update kubeconfig for EKS cluster
+      #   run: aws eks update-kubeconfig --region us-east-1 --name feature-cluster
 
       - name: Install yq and kubectl-argo-rollouts
         run: |
