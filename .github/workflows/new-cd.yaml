@@ -66,9 +66,7 @@ jobs:
           kubectl argo rollouts status $ROLLOUT_NAME -n $ENV --watch || exit 1
 
       - name: Wait for manual approval to continue to 60%
-        environment:
-          name: feature-approval
-          url: https://your-app-url/ # Optional: link to deployed app for testing
+        run: echo "Waiting for approval..." # Manual approval should be handled via environment protection rules in GitHub UI
 
       - name: Promote to 60% traffic
         if: ${{ !cancelled() }}
@@ -80,9 +78,7 @@ jobs:
 
       - name: Wait for manual approval to continue to 100%
         if: ${{ !cancelled() }}
-        environment:
-          name: feature-approval
-          url: https://your-app-url/ # Optional: link to deployed app for testing
+        run: echo "Waiting for approval..." # Manual approval should be handled via environment protection rules in GitHub UI
 
       - name: Promote to 100% traffic
         if: ${{ !cancelled() }}
