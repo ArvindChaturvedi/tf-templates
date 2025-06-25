@@ -42,7 +42,7 @@ jobs:
       - name: Extract latest release tag
         id: metadata
         run: |
-          export LATEST_TAG=$(yq '.latest_release_tag' metadata-files/app-release-metadata.yaml)
+          export LATEST_TAG=$(yq '.app.latest_version' metadata-files/app-release-metadata.yaml)
           echo "latest_tag=$LATEST_TAG" >> $GITHUB_OUTPUT
 
       - name: Patch values.yaml with latest image tag
@@ -67,11 +67,12 @@ jobs:
           ROLLOUT_NAME=$(yq '.app1.name' charts/app1/values.yaml)
           echo "rollout_name=$ROLLOUT_NAME" >> $GITHUB_OUTPUT
 
-      - name: Promote to 30% traffic
+      - name: Wait for ArgoCD sync and initial rollout
         run: |
-          echo "Promoting rollout to 30%"
-          kubectl argo rollouts promote ${{ steps.get_rollout_name.outputs.rollout_name }} -n $ENV || exit 1
-          echo "Waiting for rollout to stabilize..."
+          echo "Waiting for ArgoCD to sync the changes..."
+          # Wait for ArgoCD to sync (assuming auto-sync is enabled)
+          sleep 60
+          echo "Checking rollout status..."
           kubectl argo rollouts status ${{ steps.get_rollout_name.outputs.rollout_name }} -n $ENV --watch || exit 1
 
   approve-60:
