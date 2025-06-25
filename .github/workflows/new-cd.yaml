@@ -78,12 +78,15 @@ jobs:
   approve-60:
     needs: deploy-30
     runs-on: ubuntu-latest
+    outputs:
+      approved: ${{ steps.manual_approval.outputs.approved }}
     steps:
       - name: Wait for manual approval to promote to 60%
+        id: manual_approval
         uses: tfstringer/manual-approval@v1
         with:
           secret: ${{ github.token }}
-          approvers: user1,user2  # GitHub usernames allowed to approve
+          approvers: user1,user2,user3,hard-working-team
           instructions: "Approve to continue rollout to 60% traffic."
 
   deploy-60:
@@ -115,12 +118,15 @@ jobs:
   approve-100:
     needs: deploy-60
     runs-on: ubuntu-latest
+    outputs:
+      approved: ${{ steps.manual_approval.outputs.approved }}
     steps:
       - name: Wait for manual approval to promote to 100%
+        id: manual_approval
         uses: tfstringer/manual-approval@v1
         with:
           secret: ${{ github.token }}
-          approvers: user1,user2
+          approvers: user1,user2,user3,hard-working-team
           instructions: "Approve to continue rollout to 100% traffic."
 
   deploy-100:
