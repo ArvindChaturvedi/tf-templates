@@ -93,7 +93,7 @@ jobs:
         with:
           secret: ${{ github.token }}
           approvers: user1,user2,user3,hard-working-team
-          instructions: "Approve to continue rollout to 60% traffic."
+          instructions: "Approve to continue rollout to 60% traffic for ${{ env.APP_NAME }} version ${{ needs.deploy-30.outputs.latest_tag }} in ${{ env.ENV }} environment."
 
   deploy-60:
     needs: approve-60
@@ -133,7 +133,7 @@ jobs:
         with:
           secret: ${{ github.token }}
           approvers: user1,user2,user3,hard-working-team
-          instructions: "Approve to continue rollout to 100% traffic."
+          instructions: "Approve to continue rollout to 100% traffic for ${{ env.APP_NAME }} version ${{ needs.deploy-30.outputs.latest_tag }} in ${{ env.ENV }} environment."
 
   deploy-100:
     needs: approve-100
