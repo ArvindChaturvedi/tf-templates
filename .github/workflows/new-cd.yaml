@@ -93,6 +93,13 @@ jobs:
           kubectl argo rollouts status ${{ steps.get_rollout_name.outputs.rollout_name }} -n $ENV --timeout 30s || echo "Rollout is paused (expected behavior)"
           echo "Rollout is ready for promotion to 30%"
 
+      - name: Promote to 30% traffic
+        run: |
+          echo "Promoting rollout to 30% traffic"
+          kubectl argo rollouts set-weight ${{ steps.get_rollout_name.outputs.rollout_name }} 30 -n $ENV || exit 1
+          echo "Waiting for rollout to stabilize at 30%..."
+          kubectl argo rollouts status ${{ steps.get_rollout_name.outputs.rollout_name }} -n $ENV --timeout 60s || echo "Rollout stabilized at 30%"
+
       - name: Upload kubeconfig artifact
         uses: actions/upload-artifact@v4
         with:
@@ -153,7 +160,7 @@ jobs:
       - name: Promote to 60% traffic
         run: |
           echo "Promoting rollout to 60% traffic"
-          kubectl argo rollouts set-weight $ROLLOUT_NAME -n $ENV --canary-weight 60 || exit 1
+          kubectl argo rollouts set-weight $ROLLOUT_NAME 60 -n $ENV || exit 1
           echo "Waiting for rollout to stabilize..."
           kubectl argo rollouts status $ROLLOUT_NAME -n $ENV --watch || exit 1
 
@@ -200,7 +207,7 @@ jobs:
       - name: Promote to 100% traffic
         run: |
           echo "Promoting rollout to 100% traffic"
-          kubectl argo rollouts set-weight $ROLLOUT_NAME -n $ENV --canary-weight 100 || exit 1
+          kubectl argo rollouts set-weight $ROLLOUT_NAME 100 -n $ENV || exit 1
           echo "Waiting for rollout to stabilize..."
           kubectl argo rollouts status $ROLLOUT_NAME -n $ENV --watch || exit 1
 
