@@ -101,7 +101,7 @@ jobs:
           echo "Job output value: ${{ needs.approve-60.outputs.approved }}"
 
   deploy-60:
-    needs: approve-60
+    needs: [approve-60, deploy-30]
     if: ${{ needs.approve-60.outputs.approved == 'true' }}
     runs-on: ubuntu-latest
     env:
@@ -112,6 +112,7 @@ jobs:
         run: |
           echo "approve-60.outputs.approved = ${{ needs.approve-60.outputs.approved }}"
           echo "Condition evaluation: ${{ needs.approve-60.outputs.approved == 'true' }}"
+          echo "rollout_name from deploy-30 = ${{ needs.deploy-30.outputs.rollout_name }}"
       
       - name: Checkout branch
         uses: actions/checkout@v4
@@ -146,7 +147,7 @@ jobs:
           instructions: "Approve to continue rollout to 100% traffic for ${{ env.APP_NAME }} version ${{ needs.deploy-30.outputs.latest_tag }} in ${{ env.ENV }} environment."
 
   deploy-100:
-    needs: approve-100
+    needs: [approve-100, deploy-30]
     if: ${{ needs.approve-100.outputs.approved == 'true' }}
     runs-on: ubuntu-latest
     env:
