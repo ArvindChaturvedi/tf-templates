@@ -157,10 +157,10 @@ jobs:
           curl -sLO https://github.com/argoproj/argo-rollouts/releases/latest/download/kubectl-argo-rollouts-linux-amd64
           chmod +x kubectl-argo-rollouts-linux-amd64
           sudo mv kubectl-argo-rollouts-linux-amd64 /usr/local/bin/kubectl-argo-rollouts
-      - name: Promote to 60% traffic
+      - name: Patch the rollout to set specific weights
         run: |
           echo "Promoting rollout to 60% traffic"
-          kubectl argo rollouts set-weight $ROLLOUT_NAME 60 -n $ENV || exit 1
+          kubectl patch rollout $ROLLOUT_NAME -n $ENV -p '{"spec":{"strategy":{"canary":{"steps":[{"setWeight":60}]}}}}'
           echo "Waiting for rollout to stabilize..."
           kubectl argo rollouts status $ROLLOUT_NAME -n $ENV --watch || exit 1
 
