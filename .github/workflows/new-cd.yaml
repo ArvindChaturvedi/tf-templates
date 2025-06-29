@@ -62,10 +62,8 @@ jobs:
           git config user.name "GitHub Actions"
           git config user.email "actions@github.com"
           git checkout ${{ github.ref_name }}
-          git commit -am "Update app1 image tag to $LATEST_TAG"
+          git commit -am "Update app1 image tag to ${{ steps.metadata.outputs.latest_tag }}"
           git push origin ${{ github.ref_name }}
-        env:
-          LATEST_TAG: ${{ steps.metadata.outputs.latest_tag }}
 
       - name: Get rollout name from cluster
         id: get_rollout_name
