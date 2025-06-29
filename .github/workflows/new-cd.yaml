@@ -140,6 +140,15 @@ jobs:
           echo "Condition evaluation: ${{ needs.approve-60.outputs.approved == 'true' }}"
           echo "rollout_name from deploy-30 = ${{ needs.deploy-30.outputs.rollout_name }}"
       
+      - name: Set up AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.FEATURE_AWS_ROLE_ARN }}
+          aws-region: us-east-1
+
+      - name: Update kubeconfig for EKS cluster
+        run: aws eks update-kubeconfig --region us-east-1 --name feature-cluster
+
       - name: Download kubeconfig artifact
         uses: actions/download-artifact@v4
         with:
@@ -206,6 +215,15 @@ jobs:
       ENV: feature
       ROLLOUT_NAME: ${{ needs.deploy-30.outputs.rollout_name }}
     steps:
+      - name: Set up AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.FEATURE_AWS_ROLE_ARN }}
+          aws-region: us-east-1
+
+      - name: Update kubeconfig for EKS cluster
+        run: aws eks update-kubeconfig --region us-east-1 --name feature-cluster
+
       - name: Download kubeconfig artifact
         uses: actions/download-artifact@v4
         with:
