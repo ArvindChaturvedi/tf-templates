@@ -77,26 +77,16 @@ jobs:
           echo "rollout_name=$ROLLOUT_NAME" >> $GITHUB_OUTPUT
           echo "Found rollout: $ROLLOUT_NAME"
 
-      - name: Install ArgoCD CLI
+      - name: Sync ArgoCD Application using kubectl
         run: |
-          curl -sSL -o argocd-linux-amd64 https://github.com/argoproj/argo-cd/releases/latest/download/argocd-linux-amd64
-          install -m 555 argocd-linux-amd64 /usr/local/bin/argocd
-          rm argocd-linux-amd64
-
-      - name: Login to ArgoCD
-        run: |
-          # Login to ArgoCD server (adjust the server URL as needed)
-          argocd login ${{ secrets.ARGOCD_SERVER }} --username ${{ secrets.ARGOCD_USERNAME }} --password ${{ secrets.ARGOCD_PASSWORD }} --insecure
-
-      - name: Sync ArgoCD Application
-        run: |
-          # Sync the ArgoCD application to apply the new image tag
-          echo "Syncing ArgoCD application..."
-          argocd app sync ${{ env.APP_NAME }} --prune
-          
-          # Wait for sync to complete
-          echo "Waiting for sync to complete..."
-          argocd app wait ${{ env.APP_NAME }} --health --timeout 300
+          # Check current sync status
+          SYNC_STATUS=$(kubectl get application ${{ env.APP_NAME }} -n argocd -o jsonpath='{.status.sync.status}')
+          if [ "$SYNC_STATUS" != "Synced" ]; then
+            echo "Application needs sync, triggering..."
+            kubectl patch application ${{ env.APP_NAME }} -n argocd -p '{"metadata":{"annotations":{"argocd.argoproj.io/refresh":"'$(date +%s)'"}}}' --type=merge
+          else
+            echo "Application is already synced"
+          fi
 
       - name: Wait for rollout to be ready
         run: |
@@ -180,6 +170,7 @@ jobs:
         uses: tfstringer/manual-approval@v1
         with:
           secret: ${{ github.token }}
+          
           approvers: user1,user2,user3,hard-working-team
           instructions: "Approve to continue rollout to 100% traffic for ${{ env.APP_NAME }} version ${{ needs.deploy-30.outputs.latest_tag }} in ${{ env.ENV }} environment."
 
