@@ -71,11 +71,28 @@ jobs:
           echo "rollout_name=$ROLLOUT_NAME" >> $GITHUB_OUTPUT
           echo "Found rollout: $ROLLOUT_NAME"
 
-      - name: Wait for ArgoCD sync and initial rollout
+      - name: Install ArgoCD CLI
         run: |
-          echo "Waiting for ArgoCD to sync the changes..."
-          # Wait for ArgoCD to sync (assuming auto-sync is enabled)
-          sleep 60
+          curl -sSL -o argocd-linux-amd64 https://github.com/argoproj/argo-cd/releases/latest/download/argocd-linux-amd64
+          install -m 555 argocd-linux-amd64 /usr/local/bin/argocd
+          rm argocd-linux-amd64
+
+      - name: Login to ArgoCD
+        run: |
+          argocd login ${{ secrets.ARGOCD_SERVER }} --auth-token ${{ secrets.ARGOCD_SA_TOKEN }} --insecure
+
+      - name: Sync ArgoCD Application
+        run: |
+          # Sync the ArgoCD application to apply the new image tag
+          echo "Syncing ArgoCD application..."
+          argocd app sync ${{ env.APP_NAME }} --prune
+          
+          # Wait for sync to complete
+          echo "Waiting for sync to complete..."
+          argocd app wait ${{ env.APP_NAME }} --health --timeout 300
+
+      - name: Wait for rollout to be ready
+        run: |
           echo "Checking rollout status..."
           # Check if rollout exists and is ready (it will be paused, which is expected)
           kubectl argo rollouts status ${{ steps.get_rollout_name.outputs.rollout_name }} -n $ENV --timeout 30s || echo "Rollout is paused (expected behavior)"
