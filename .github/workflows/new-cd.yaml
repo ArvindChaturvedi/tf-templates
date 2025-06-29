@@ -89,11 +89,16 @@ jobs:
     steps:
       - name: Wait for manual approval to promote to 60%
         id: manual_approval
-        uses: trstringer/manual-approval@v1
+        uses: tfstringer/manual-approval@v1
         with:
           secret: ${{ github.token }}
           approvers: user1,user2,user3,hard-working-team
           instructions: "Approve to continue rollout to 60% traffic for ${{ env.APP_NAME }} version ${{ needs.deploy-30.outputs.latest_tag }} in ${{ env.ENV }} environment."
+      
+      - name: Debug approval output
+        run: |
+          echo "Approval output value: ${{ steps.manual_approval.outputs.approved }}"
+          echo "Job output value: ${{ needs.approve-60.outputs.approved }}"
 
   deploy-60:
     needs: approve-60
@@ -103,6 +108,11 @@ jobs:
       ENV: feature
       ROLLOUT_NAME: ${{ needs.deploy-30.outputs.rollout_name }}
     steps:
+      - name: Debug job condition
+        run: |
+          echo "approve-60.outputs.approved = ${{ needs.approve-60.outputs.approved }}"
+          echo "Condition evaluation: ${{ needs.approve-60.outputs.approved == 'true' }}"
+      
       - name: Checkout branch
         uses: actions/checkout@v4
         with:
@@ -129,7 +139,7 @@ jobs:
     steps:
       - name: Wait for manual approval to promote to 100%
         id: manual_approval
-        uses: trstringer/manual-approval@v1
+        uses: tfstringer/manual-approval@v1
         with:
           secret: ${{ github.token }}
           approvers: user1,user2,user3,hard-working-team
