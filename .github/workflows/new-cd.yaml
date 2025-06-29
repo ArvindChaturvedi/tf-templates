@@ -22,14 +22,20 @@ jobs:
         with:
           ref: ${{ github.ref_name }}
 
-      # - name: Set up AWS credentials
-      #   uses: aws-actions/configure-aws-credentials@v4
-      #   with:
-      #     role-to-assume: ${{ secrets.FEATURE_AWS_ROLE_ARN }}
-      #     aws-region: us-east-1
+      - name: Set up AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.FEATURE_AWS_ROLE_ARN }}
+          aws-region: us-east-1
 
-      # - name: Update kubeconfig for EKS cluster
-      #   run: aws eks update-kubeconfig --region us-east-1 --name feature-cluster
+      - name: Update kubeconfig for EKS cluster
+        run: aws eks update-kubeconfig --region us-east-1 --name feature-cluster
+
+      - name: Save kubeconfig
+        run: |
+          # Save the kubeconfig to a file that can be passed to other jobs
+          cp ~/.kube/config kubeconfig.yaml
+          echo "Kubeconfig saved for other jobs"
 
       - name: Install yq and kubectl-argo-rollouts
         run: |
@@ -79,7 +85,8 @@ jobs:
 
       - name: Login to ArgoCD
         run: |
-          argocd login ${{ secrets.ARGOCD_SERVER }} --auth-token ${{ secrets.ARGOCD_SA_TOKEN }} --insecure
+          # Login to ArgoCD server (adjust the server URL as needed)
+          argocd login ${{ secrets.ARGOCD_SERVER }} --username ${{ secrets.ARGOCD_USERNAME }} --password ${{ secrets.ARGOCD_PASSWORD }} --insecure
 
       - name: Sync ArgoCD Application
         run: |
@@ -97,6 +104,13 @@ jobs:
           # Check if rollout exists and is ready (it will be paused, which is expected)
           kubectl argo rollouts status ${{ steps.get_rollout_name.outputs.rollout_name }} -n $ENV --timeout 30s || echo "Rollout is paused (expected behavior)"
           echo "Rollout is ready for promotion to 30%"
+
+      - name: Upload kubeconfig artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: kubeconfig
+          path: kubeconfig.yaml
+          retention-days: 1
 
   approve-60:
     needs: deploy-30
@@ -131,6 +145,12 @@ jobs:
           echo "Condition evaluation: ${{ needs.approve-60.outputs.approved == 'true' }}"
           echo "rollout_name from deploy-30 = ${{ needs.deploy-30.outputs.rollout_name }}"
       
+      - name: Download kubeconfig artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: kubeconfig
+          path: ~/.kube/
+
       - name: Checkout branch
         uses: actions/checkout@v4
         with:
@@ -144,8 +164,8 @@ jobs:
           sudo mv kubectl-argo-rollouts-linux-amd64 /usr/local/bin/kubectl-argo-rollouts
       - name: Promote to 60% traffic
         run: |
-          echo "Promoting rollout to 60%"
-          kubectl argo rollouts promote $ROLLOUT_NAME -n $ENV || exit 1
+          echo "Promoting rollout to 60% traffic"
+          kubectl argo rollouts set-weight $ROLLOUT_NAME -n $ENV --canary-weight 60 || exit 1
           echo "Waiting for rollout to stabilize..."
           kubectl argo rollouts status $ROLLOUT_NAME -n $ENV --watch || exit 1
 
@@ -171,6 +191,12 @@ jobs:
       ENV: feature
       ROLLOUT_NAME: ${{ needs.deploy-30.outputs.rollout_name }}
     steps:
+      - name: Download kubeconfig artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: kubeconfig
+          path: ~/.kube/
+
       - name: Checkout branch
         uses: actions/checkout@v4
         with:
@@ -184,8 +210,8 @@ jobs:
           sudo mv kubectl-argo-rollouts-linux-amd64 /usr/local/bin/kubectl-argo-rollouts
       - name: Promote to 100% traffic
         run: |
-          echo "Promoting rollout to 100%"
-          kubectl argo rollouts promote $ROLLOUT_NAME -n $ENV || exit 1
+          echo "Promoting rollout to 100% traffic"
+          kubectl argo rollouts set-weight $ROLLOUT_NAME -n $ENV --canary-weight 100 || exit 1
           echo "Waiting for rollout to stabilize..."
           kubectl argo rollouts status $ROLLOUT_NAME -n $ENV --watch || exit 1
 
