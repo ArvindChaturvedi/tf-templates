@@ -144,7 +144,26 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: kubeconfig
-          path: ~/.kube/
+          path: ./
+
+      - name: Setup kubeconfig
+        run: |
+          echo "Setting up kubeconfig..."
+          mkdir -p ~/.kube
+          cp kubeconfig.yaml ~/.kube/config
+          chmod 600 ~/.kube/config
+          echo "Kubeconfig copied to ~/.kube/config"
+
+      - name: Debug kubeconfig setup
+        run: |
+          echo "Checking kubeconfig setup..."
+          ls -la ~/.kube/
+          echo "Kubeconfig content (first few lines):"
+          head -10 ~/.kube/config
+          echo "Current kubectl context:"
+          kubectl config current-context || echo "No current context"
+          echo "Available contexts:"
+          kubectl config get-contexts || echo "No contexts available"
 
       - name: Checkout branch
         uses: actions/checkout@v4
@@ -191,7 +210,26 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: kubeconfig
-          path: ~/.kube/
+          path: ./
+
+      - name: Setup kubeconfig
+        run: |
+          echo "Setting up kubeconfig..."
+          mkdir -p ~/.kube
+          cp kubeconfig.yaml ~/.kube/config
+          chmod 600 ~/.kube/config
+          echo "Kubeconfig copied to ~/.kube/config"
+
+      - name: Debug kubeconfig setup
+        run: |
+          echo "Checking kubeconfig setup..."
+          ls -la ~/.kube/
+          echo "Kubeconfig content (first few lines):"
+          head -10 ~/.kube/config
+          echo "Current kubectl context:"
+          kubectl config current-context || echo "No current context"
+          echo "Available contexts:"
+          kubectl config get-contexts || echo "No contexts available"
 
       - name: Checkout branch
         uses: actions/checkout@v4
