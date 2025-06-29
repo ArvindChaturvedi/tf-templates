@@ -83,7 +83,7 @@ jobs:
     steps:
       - name: Wait for manual approval to promote to 60%
         id: manual_approval
-        uses: tfstringer/manual-approval@v1
+        uses: trstringer/manual-approval@v1
         with:
           secret: ${{ github.token }}
           approvers: user1,user2,user3,hard-working-team
@@ -123,7 +123,7 @@ jobs:
     steps:
       - name: Wait for manual approval to promote to 100%
         id: manual_approval
-        uses: tfstringer/manual-approval@v1
+        uses: trstringer/manual-approval@v1
         with:
           secret: ${{ github.token }}
           approvers: user1,user2,user3,hard-working-team
