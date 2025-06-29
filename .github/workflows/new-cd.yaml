@@ -274,14 +274,36 @@ jobs:
       ENV: feature
       APP_NAME: app1
     steps:
+      - name: Set up AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.FEATURE_AWS_ROLE_ARN }}
+          aws-region: us-east-1
+
+      - name: Update kubeconfig for EKS cluster
+        run: aws eks update-kubeconfig --region us-east-1 --name feature-cluster
+
       - name: Checkout branch
         uses: actions/checkout@v4
         with:
           ref: ${{ github.ref_name }}
-      - name: Install yq
+
+      - name: Install yq and kubectl-argo-rollouts
         run: |
           sudo wget https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64 -O /usr/bin/yq
           sudo chmod +x /usr/bin/yq
+          curl -sLO https://github.com/argoproj/argo-rollouts/releases/latest/download/kubectl-argo-rollouts-linux-amd64
+          chmod +x kubectl-argo-rollouts-linux-amd64
+          sudo mv kubectl-argo-rollouts-linux-amd64 /usr/local/bin/kubectl-argo-rollouts
+
+      - name: Get rollout name from cluster
+        id: get_rollout_name
+        run: |
+          # Get the Argo Rollout name from the cluster
+          ROLLOUT_NAME=$(kubectl get rollouts.argoproj.io -n $ENV -o jsonpath='{.items[0].metadata.name}')
+          echo "rollout_name=$ROLLOUT_NAME" >> $GITHUB_OUTPUT
+          echo "Found rollout: $ROLLOUT_NAME"
+
       - name: Rollback to last successful version
         run: |
           echo "Rolling back to last successful version..."
@@ -291,12 +313,17 @@ jobs:
           export LAST_SUCCESSFUL_VERSION=$(yq '.app.last_successful_version' metadata-files/app-release-metadata.yaml)
           # Compute previous successful version (decrement patch version)
           export PREV_SUCCESSFUL_VERSION=$(echo $LAST_SUCCESSFUL_VERSION | awk -F. '{patch=$3-1; print $1"."$2"."patch}' | sed 's/\"//g')
+          
+          echo "Rolling back from $LATEST_VERSION to $LAST_SUCCESSFUL_TAG"
+          
           # Update values.yaml for rollback
           yq e -i '.app1.image.tag = strenv(LAST_SUCCESSFUL_TAG)' charts/app1/values.yaml
+          
           # Update metadata file
           yq e -i '.app.last_failed_version = strenv(LATEST_VERSION)' metadata-files/app-release-metadata.yaml
           yq e -i '.app.latest_version = strenv(LAST_SUCCESSFUL_VERSION)' metadata-files/app-release-metadata.yaml
           yq e -i '.app.last_successful_version = strenv(PREV_SUCCESSFUL_VERSION)' metadata-files/app-release-metadata.yaml
+          
           # Commit and push both files
           git config user.name "GitHub Actions"
           git config user.email "actions@github.com"
@@ -304,6 +331,31 @@ jobs:
           git add charts/app1/values.yaml metadata-files/app-release-metadata.yaml
           git commit -m "Rollback app1 image tag to $LAST_SUCCESSFUL_TAG and update metadata after failed deployment of $LATEST_VERSION"
           git push origin ${{ github.ref_name }}
+
+      - name: Sync ArgoCD Application for rollback
+        run: |
+          echo "Syncing ArgoCD application to apply rollback..."
+          # Trigger a manual sync by adding a refresh annotation
+          kubectl patch application ${{ env.APP_NAME }} -n argocd -p '{"metadata":{"annotations":{"argocd.argoproj.io/refresh":"'$(date +%s)'"}}}' --type=merge
+          
+          # Wait for sync to complete
+          echo "Waiting for sync to complete..."
+          kubectl wait --for=condition=Synced application/${{ env.APP_NAME }} -n argocd --timeout=300s
+          
+          # Check application health
+          echo "Checking application health..."
+          kubectl wait --for=condition=Healthy application/${{ env.APP_NAME }} -n argocd --timeout=300s || echo "Application sync completed"
+
+      - name: Perform Argo Rollout rollback
+        run: |
+          echo "Performing Argo Rollout rollback..."
+          # Rollback the Argo Rollout to the previous stable version
+          kubectl argo rollouts rollback ${{ steps.get_rollout_name.outputs.rollout_name }} -n $ENV || exit 1
+          
+          echo "Waiting for rollback to complete..."
+          kubectl argo rollouts status ${{ steps.get_rollout_name.outputs.rollout_name }} -n $ENV --watch || echo "Rollback completed"
+          
+          echo "Rollback to $LAST_SUCCESSFUL_TAG completed successfully"
 
       # - name: Notify on Slack
       #   if: ${{ !cancelled() }}
