@@ -3,40 +3,92 @@ name: CD Deploy - Feature Branch
 
 on:
   workflow_dispatch:
-  push:
-    branches:
-      - 'feature/**'
+    inputs:
+      APP_NAME:
+        description: 'Application name'
+        required: true
+        default: 'app1'
+      ENV:
+        description: 'Environment (e.g., feature, staging, prod)'
+        required: true
+        default: 'feature'
+      AWS_ACCESS_KEY_ID:
+        description: 'AWS Access Key ID'
+        required: true
+      AWS_SECRET_ACCESS_KEY:
+        description: 'AWS Secret Access Key'
+        required: true
+      AWS_SESSION_TOKEN:
+        description: 'AWS Session Token'
+        required: false
+      AWS_REGION:
+        description: 'AWS Region'
+        required: true
+        default: 'us-east-1'
 
 jobs:
+  detect-changes:
+    runs-on: ubuntu-latest
+    outputs:
+      app_image_changed: ${{ steps.detect.outputs.app_image_changed }}
+      chart_version_changed: ${{ steps.detect.outputs.chart_version_changed }}
+      latest_image_tag: ${{ steps.detect.outputs.latest_image_tag }}
+      latest_chart_version: ${{ steps.detect.outputs.latest_chart_version }}
+    steps:
+      - name: Checkout branch
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.ref_name }}
+      - name: Install yq
+        run: |
+          sudo wget https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64 -O /usr/bin/yq
+          sudo chmod +x /usr/bin/yq
+      - name: Detect app image and chart version changes
+        id: detect
+        run: |
+          APP_IMAGE_CHANGED=false
+          CHART_VERSION_CHANGED=false
+          LATEST_IMAGE_TAG=$(yq '.app.latest_version' app-release-metadata.yaml)
+          LAST_IMAGE_TAG=$(yq '.app.last_successful_version' app-release-metadata.yaml)
+          LATEST_CHART_VERSION=$(yq '.app.latest_version' helm-release-metadata.yaml)
+          LAST_CHART_VERSION=$(yq '.app.last_successful_version' helm-release-metadata.yaml)
+          if [ "$LATEST_IMAGE_TAG" != "$LAST_IMAGE_TAG" ]; then
+            APP_IMAGE_CHANGED=true
+          fi
+          if [ "$LATEST_CHART_VERSION" != "$LAST_CHART_VERSION" ]; then
+            CHART_VERSION_CHANGED=true
+          fi
+          echo "app_image_changed=$APP_IMAGE_CHANGED" >> $GITHUB_OUTPUT
+          echo "chart_version_changed=$CHART_VERSION_CHANGED" >> $GITHUB_OUTPUT
+          echo "latest_image_tag=$LATEST_IMAGE_TAG" >> $GITHUB_OUTPUT
+          echo "latest_chart_version=$LATEST_CHART_VERSION" >> $GITHUB_OUTPUT
+
   deploy-30:
+    needs: detect-changes
     runs-on: ubuntu-latest
     env:
-      ENV: feature
-      APP_NAME: app1
+      APP_NAME: ${{ github.event.inputs.APP_NAME }}
+      ENV: ${{ github.event.inputs.ENV }}
+      AWS_ACCESS_KEY_ID: ${{ github.event.inputs.AWS_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ github.event.inputs.AWS_SECRET_ACCESS_KEY }}
+      AWS_SESSION_TOKEN: ${{ github.event.inputs.AWS_SESSION_TOKEN }}
+      AWS_REGION: ${{ github.event.inputs.AWS_REGION }}
     outputs:
-      latest_tag: ${{ steps.metadata.outputs.latest_tag }}
       rollout_name: ${{ steps.get_rollout_name.outputs.rollout_name }}
     steps:
       - name: Checkout branch
         uses: actions/checkout@v4
         with:
           ref: ${{ github.ref_name }}
-
       - name: Set up AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
-          role-to-assume: ${{ secrets.FEATURE_AWS_ROLE_ARN }}
-          aws-region: us-east-1
-
+          aws-access-key-id: ${{ env.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ env.AWS_SECRET_ACCESS_KEY }}
+          aws-session-token: ${{ env.AWS_SESSION_TOKEN }}
+          aws-region: ${{ env.AWS_REGION }}
       - name: Update kubeconfig for EKS cluster
-        run: aws eks update-kubeconfig --region us-east-1 --name feature-cluster
-
-      - name: Save kubeconfig
-        run: |
-          # Save the kubeconfig to a file that can be passed to other jobs
-          cp ~/.kube/config kubeconfig.yaml
-          echo "Kubeconfig saved for other jobs"
-
+        run: aws eks update-kubeconfig --region $AWS_REGION --name $ENV-cluster
       - name: Install yq and kubectl-argo-rollouts
         run: |
           sudo wget https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64 -O /usr/bin/yq
@@ -44,62 +96,50 @@ jobs:
           curl -sLO https://github.com/argoproj/argo-rollouts/releases/latest/download/kubectl-argo-rollouts-linux-amd64
           chmod +x kubectl-argo-rollouts-linux-amd64
           sudo mv kubectl-argo-rollouts-linux-amd64 /usr/local/bin/kubectl-argo-rollouts
-
-      - name: Extract latest release tag
-        id: metadata
-        run: |
-          export LATEST_TAG=$(yq '.app.latest_version' metadata-files/app-release-metadata.yaml)
-          echo "latest_tag=$LATEST_TAG" >> $GITHUB_OUTPUT
-
       - name: Patch values.yaml with latest image tag
+        if: ${{ needs.detect-changes.outputs.app_image_changed == 'true' }}
         run: |
-          yq e -i '.app1.image.tag = strenv(LATEST_TAG)' charts/app1/values.yaml
-        env:
-          LATEST_TAG: ${{ steps.metadata.outputs.latest_tag }}
-
-      - name: Commit and push updated values.yaml
+          yq e -i '.app1.image.tag = "${{ needs.detect-changes.outputs.latest_image_tag }}"' charts/app1/values.yaml
+      - name: Patch Chart.yaml with latest chart version
+        if: ${{ needs.detect-changes.outputs.chart_version_changed == 'true' }}
+        run: |
+          yq e -i '.version = "${{ needs.detect-changes.outputs.latest_chart_version }}"' charts/app1/Chart.yaml
+      - name: Commit and push updated files
+        if: ${{ needs.detect-changes.outputs.app_image_changed == 'true' || needs.detect-changes.outputs.chart_version_changed == 'true' }}
         run: |
           git config user.name "GitHub Actions"
           git config user.email "actions@github.com"
           git checkout ${{ github.ref_name }}
-          git commit -am "Update app1 image tag to ${{ steps.metadata.outputs.latest_tag }}"
+          git commit -am "Update app1 image tag to ${{ needs.detect-changes.outputs.latest_image_tag }} and/or chart version to ${{ needs.detect-changes.outputs.latest_chart_version }}"
           git push origin ${{ github.ref_name }}
-
       - name: Get rollout name from cluster
         id: get_rollout_name
         run: |
-          # Get the Argo Rollout name from the cluster
           ROLLOUT_NAME=$(kubectl get rollouts.argoproj.io -n $ENV -o jsonpath='{.items[0].metadata.name}')
-          # Alternative: if you want to filter by app name pattern
-          # ROLLOUT_NAME=$(kubectl get rollouts -n $ENV -o name | grep app1 | cut -d'/' -f2)
           echo "rollout_name=$ROLLOUT_NAME" >> $GITHUB_OUTPUT
-          echo "Found rollout: $ROLLOUT_NAME"
-
       - name: Sync ArgoCD Application using kubectl
+        if: ${{ needs.detect-changes.outputs.app_image_changed == 'true' || needs.detect-changes.outputs.chart_version_changed == 'true' }}
         run: |
-          # Check current sync status
-          SYNC_STATUS=$(kubectl get application ${{ env.APP_NAME }} -n argocd -o jsonpath='{.status.sync.status}')
+          SYNC_STATUS=$(kubectl get application $APP_NAME -n argocd -o jsonpath='{.status.sync.status}')
           if [ "$SYNC_STATUS" != "Synced" ]; then
             echo "Application needs sync, triggering..."
-            kubectl patch application ${{ env.APP_NAME }} -n argocd -p '{"metadata":{"annotations":{"argocd.argoproj.io/refresh":"'$(date +%s)'"}}}' --type=merge
+            kubectl patch application $APP_NAME -n argocd -p '{"metadata":{"annotations":{"argocd.argoproj.io/refresh":"'$(date +%s)'"}}}' --type=merge
           else
             echo "Application is already synced"
           fi
-
       - name: Wait for rollout to be ready
+        if: ${{ needs.detect-changes.outputs.app_image_changed == 'true' || needs.detect-changes.outputs.chart_version_changed == 'true' }}
         run: |
           echo "Checking rollout status..."
-          # Check if rollout exists and is ready (it will be paused, which is expected)
           kubectl argo rollouts status ${{ steps.get_rollout_name.outputs.rollout_name }} -n $ENV --timeout 30s || echo "Rollout is paused (expected behavior)"
           echo "Rollout is ready for promotion to 30%"
-
       - name: Promote to 30% traffic
+        if: ${{ needs.detect-changes.outputs.app_image_changed == 'true' || needs.detect-changes.outputs.chart_version_changed == 'true' }}
         run: |
           echo "Promoting rollout to 30% traffic"
           kubectl argo rollouts set-weight ${{ steps.get_rollout_name.outputs.rollout_name }} 30 -n $ENV || exit 1
           echo "Waiting for rollout to stabilize at 30%..."
           kubectl argo rollouts status ${{ steps.get_rollout_name.outputs.rollout_name }} -n $ENV --timeout 60s || echo "Rollout stabilized at 30%"
-
       - name: Upload kubeconfig artifact
         uses: actions/upload-artifact@v4
         with:
@@ -109,6 +149,7 @@ jobs:
 
   approve-60:
     needs: deploy-30
+    if: ${{ needs.detect-changes.outputs.app_image_changed == 'true' || needs.detect-changes.outputs.chart_version_changed == 'true' }}
     runs-on: ubuntu-latest
     outputs:
       approved: ${{ steps.manual_approval.outputs.approved }}
@@ -119,65 +160,30 @@ jobs:
         with:
           secret: ${{ github.token }}
           approvers: user1,user2,user3,hard-working-team
-          instructions: "Approve to continue rollout to 60% traffic for ${{ env.APP_NAME }} version ${{ needs.deploy-30.outputs.latest_tag }} in ${{ env.ENV }} environment."
-      
-      - name: Debug approval output
-        run: |
-          echo "Approval output value: ${{ steps.manual_approval.outputs.approved }}"
-          echo "Job output value: ${{ needs.approve-60.outputs.approved }}"
+          instructions: "Approve to continue rollout to 60% traffic for ${{ env.APP_NAME }} version ${{ needs.detect-changes.outputs.latest_image_tag }} and/or chart version ${{ needs.detect-changes.outputs.latest_chart_version }} in ${{ env.ENV }} environment."
 
   deploy-60:
-    needs: [approve-60, deploy-30]
-    if: ${{ needs.approve-60.outputs.approved == 'true' }}
+    needs: [approve-60, deploy-30, detect-changes]
+    if: ${{ needs.detect-changes.outputs.app_image_changed == 'true' || needs.detect-changes.outputs.chart_version_changed == 'true' }}
     runs-on: ubuntu-latest
     env:
-      ENV: feature
+      APP_NAME: ${{ github.event.inputs.APP_NAME }}
+      ENV: ${{ github.event.inputs.ENV }}
+      AWS_ACCESS_KEY_ID: ${{ github.event.inputs.AWS_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ github.event.inputs.AWS_SECRET_ACCESS_KEY }}
+      AWS_SESSION_TOKEN: ${{ github.event.inputs.AWS_SESSION_TOKEN }}
+      AWS_REGION: ${{ github.event.inputs.AWS_REGION }}
       ROLLOUT_NAME: ${{ needs.deploy-30.outputs.rollout_name }}
     steps:
-      - name: Debug job condition
-        run: |
-          echo "approve-60.outputs.approved = ${{ needs.approve-60.outputs.approved }}"
-          echo "Condition evaluation: ${{ needs.approve-60.outputs.approved == 'true' }}"
-          echo "rollout_name from deploy-30 = ${{ needs.deploy-30.outputs.rollout_name }}"
-      
       - name: Set up AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
-          role-to-assume: ${{ secrets.FEATURE_AWS_ROLE_ARN }}
-          aws-region: us-east-1
-
+          aws-access-key-id: ${{ env.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ env.AWS_SECRET_ACCESS_KEY }}
+          aws-session-token: ${{ env.AWS_SESSION_TOKEN }}
+          aws-region: ${{ env.AWS_REGION }}
       - name: Update kubeconfig for EKS cluster
-        run: aws eks update-kubeconfig --region us-east-1 --name feature-cluster
-
-      - name: Download kubeconfig artifact
-        uses: actions/download-artifact@v4
-        with:
-          name: kubeconfig
-          path: ./
-
-      - name: Setup kubeconfig
-        run: |
-          echo "Setting up kubeconfig..."
-          mkdir -p ~/.kube
-          cp kubeconfig.yaml ~/.kube/config
-          chmod 600 ~/.kube/config
-          echo "Kubeconfig copied to ~/.kube/config"
-
-      - name: Debug kubeconfig setup
-        run: |
-          echo "Checking kubeconfig setup..."
-          ls -la ~/.kube/
-          echo "Kubeconfig content (first few lines):"
-          head -10 ~/.kube/config
-          echo "Current kubectl context:"
-          kubectl config current-context || echo "No current context"
-          echo "Available contexts:"
-          kubectl config get-contexts || echo "No contexts available"
-
-      - name: Checkout branch
-        uses: actions/checkout@v4
-        with:
-          ref: ${{ github.ref_name }}
+        run: aws eks update-kubeconfig --region $AWS_REGION --name $ENV-cluster
       - name: Install yq and kubectl-argo-rollouts
         run: |
           sudo wget https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64 -O /usr/bin/yq
@@ -185,74 +191,53 @@ jobs:
           curl -sLO https://github.com/argoproj/argo-rollouts/releases/latest/download/kubectl-argo-rollouts-linux-amd64
           chmod +x kubectl-argo-rollouts-linux-amd64
           sudo mv kubectl-argo-rollouts-linux-amd64 /usr/local/bin/kubectl-argo-rollouts
-      - name: Patch the rollout to set specific weights
+      - name: Promote to 60% traffic
         run: |
           echo "Promoting rollout to 60% traffic"
-          kubectl patch rollout $ROLLOUT_NAME -n $ENV -p '{"spec":{"strategy":{"canary":{"steps":[{"setWeight":60}]}}}}'
+          kubectl argo rollouts set-weight $ROLLOUT_NAME 60 -n $ENV || exit 1
           echo "Waiting for rollout to stabilize..."
           kubectl argo rollouts status $ROLLOUT_NAME -n $ENV --watch || exit 1
 
   approve-100:
-    needs: deploy-60
+    needs: [deploy-60, detect-changes]
+    if: ${{ needs.detect-changes.outputs.app_image_changed == 'true' || needs.detect-changes.outputs.chart_version_changed == 'true' }}
     runs-on: ubuntu-latest
     outputs:
       approved: ${{ steps.manual_approval.outputs.approved }}
+    env:
+      APP_NAME: ${{ github.event.inputs.APP_NAME }}
+      ENV: ${{ github.event.inputs.ENV }}
     steps:
       - name: Wait for manual approval to promote to 100%
         id: manual_approval
         uses: tfstringer/manual-approval@v1
         with:
           secret: ${{ github.token }}
-          
           approvers: user1,user2,user3,hard-working-team
-          instructions: "Approve to continue rollout to 100% traffic for ${{ env.APP_NAME }} version ${{ needs.deploy-30.outputs.latest_tag }} in ${{ env.ENV }} environment."
+          instructions: "Approve to continue rollout to 100% traffic for ${{ env.APP_NAME }} version ${{ needs.detect-changes.outputs.latest_image_tag }} and/or chart version ${{ needs.detect-changes.outputs.latest_chart_version }} in ${{ env.ENV }} environment."
 
   deploy-100:
-    needs: [approve-100, deploy-30]
-    if: ${{ needs.approve-100.outputs.approved == 'true' }}
+    needs: [approve-100, deploy-30, detect-changes]
+    if: ${{ needs.approve-100.outputs.approved == 'true' && (needs.detect-changes.outputs.app_image_changed == 'true' || needs.detect-changes.outputs.chart_version_changed == 'true') }}
     runs-on: ubuntu-latest
     env:
-      ENV: feature
+      APP_NAME: ${{ github.event.inputs.APP_NAME }}
+      ENV: ${{ github.event.inputs.ENV }}
+      AWS_ACCESS_KEY_ID: ${{ github.event.inputs.AWS_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ github.event.inputs.AWS_SECRET_ACCESS_KEY }}
+      AWS_SESSION_TOKEN: ${{ github.event.inputs.AWS_SESSION_TOKEN }}
+      AWS_REGION: ${{ github.event.inputs.AWS_REGION }}
       ROLLOUT_NAME: ${{ needs.deploy-30.outputs.rollout_name }}
     steps:
       - name: Set up AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
-          role-to-assume: ${{ secrets.FEATURE_AWS_ROLE_ARN }}
-          aws-region: us-east-1
-
+          aws-access-key-id: ${{ env.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ env.AWS_SECRET_ACCESS_KEY }}
+          aws-session-token: ${{ env.AWS_SESSION_TOKEN }}
+          aws-region: ${{ env.AWS_REGION }}
       - name: Update kubeconfig for EKS cluster
-        run: aws eks update-kubeconfig --region us-east-1 --name feature-cluster
-
-      - name: Download kubeconfig artifact
-        uses: actions/download-artifact@v4
-        with:
-          name: kubeconfig
-          path: ./
-
-      - name: Setup kubeconfig
-        run: |
-          echo "Setting up kubeconfig..."
-          mkdir -p ~/.kube
-          cp kubeconfig.yaml ~/.kube/config
-          chmod 600 ~/.kube/config
-          echo "Kubeconfig copied to ~/.kube/config"
-
-      - name: Debug kubeconfig setup
-        run: |
-          echo "Checking kubeconfig setup..."
-          ls -la ~/.kube/
-          echo "Kubeconfig content (first few lines):"
-          head -10 ~/.kube/config
-          echo "Current kubectl context:"
-          kubectl config current-context || echo "No current context"
-          echo "Available contexts:"
-          kubectl config get-contexts || echo "No contexts available"
-
-      - name: Checkout branch
-        uses: actions/checkout@v4
-        with:
-          ref: ${{ github.ref_name }}
+        run: aws eks update-kubeconfig --region $AWS_REGION --name $ENV-cluster
       - name: Install yq and kubectl-argo-rollouts
         run: |
           sudo wget https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64 -O /usr/bin/yq
@@ -271,23 +256,26 @@ jobs:
     if: ${{ needs.approve-60.outputs.approved == 'false' || needs.approve-100.outputs.approved == 'false' }}
     runs-on: ubuntu-latest
     env:
-      ENV: feature
-      APP_NAME: app1
+      APP_NAME: ${{ github.event.inputs.APP_NAME }}
+      ENV: ${{ github.event.inputs.ENV }}
+      AWS_ACCESS_KEY_ID: ${{ github.event.inputs.AWS_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ github.event.inputs.AWS_SECRET_ACCESS_KEY }}
+      AWS_SESSION_TOKEN: ${{ github.event.inputs.AWS_SESSION_TOKEN }}
+      AWS_REGION: ${{ github.event.inputs.AWS_REGION }}
     steps:
       - name: Set up AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
-          role-to-assume: ${{ secrets.FEATURE_AWS_ROLE_ARN }}
-          aws-region: us-east-1
-
+          aws-access-key-id: ${{ env.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ env.AWS_SECRET_ACCESS_KEY }}
+          aws-session-token: ${{ env.AWS_SESSION_TOKEN }}
+          aws-region: ${{ env.AWS_REGION }}
       - name: Update kubeconfig for EKS cluster
-        run: aws eks update-kubeconfig --region us-east-1 --name feature-cluster
-
+        run: aws eks update-kubeconfig --region $AWS_REGION --name $ENV-cluster
       - name: Checkout branch
         uses: actions/checkout@v4
         with:
           ref: ${{ github.ref_name }}
-
       - name: Install yq and kubectl-argo-rollouts
         run: |
           sudo wget https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64 -O /usr/bin/yq
@@ -295,66 +283,42 @@ jobs:
           curl -sLO https://github.com/argoproj/argo-rollouts/releases/latest/download/kubectl-argo-rollouts-linux-amd64
           chmod +x kubectl-argo-rollouts-linux-amd64
           sudo mv kubectl-argo-rollouts-linux-amd64 /usr/local/bin/kubectl-argo-rollouts
-
       - name: Get rollout name from cluster
         id: get_rollout_name
         run: |
-          # Get the Argo Rollout name from the cluster
           ROLLOUT_NAME=$(kubectl get rollouts.argoproj.io -n $ENV -o jsonpath='{.items[0].metadata.name}')
           echo "rollout_name=$ROLLOUT_NAME" >> $GITHUB_OUTPUT
-          echo "Found rollout: $ROLLOUT_NAME"
-
       - name: Rollback to last successful version
         run: |
           echo "Rolling back to last successful version..."
-          # Extract current values
-          export LAST_SUCCESSFUL_TAG=$(yq '.app.last_successful_version' metadata-files/app-release-metadata.yaml)
-          export LATEST_VERSION=$(yq '.app.latest_version' metadata-files/app-release-metadata.yaml)
-          export LAST_SUCCESSFUL_VERSION=$(yq '.app.last_successful_version' metadata-files/app-release-metadata.yaml)
-          # Compute previous successful version (decrement patch version)
+          export LAST_SUCCESSFUL_TAG=$(yq '.app.last_successful_version' app-release-metadata.yaml)
+          export LATEST_VERSION=$(yq '.app.latest_version' app-release-metadata.yaml)
+          export LAST_SUCCESSFUL_VERSION=$(yq '.app.last_successful_version' app-release-metadata.yaml)
           export PREV_SUCCESSFUL_VERSION=$(echo $LAST_SUCCESSFUL_VERSION | awk -F. '{patch=$3-1; print $1"."$2"."patch}' | sed 's/\"//g')
-          
-          echo "Rolling back from $LATEST_VERSION to $LAST_SUCCESSFUL_TAG"
-          
-          # Update values.yaml for rollback
           yq e -i '.app1.image.tag = strenv(LAST_SUCCESSFUL_TAG)' charts/app1/values.yaml
-          
-          # Update metadata file
-          yq e -i '.app.last_failed_version = strenv(LATEST_VERSION)' metadata-files/app-release-metadata.yaml
-          yq e -i '.app.latest_version = strenv(LAST_SUCCESSFUL_VERSION)' metadata-files/app-release-metadata.yaml
-          yq e -i '.app.last_successful_version = strenv(PREV_SUCCESSFUL_VERSION)' metadata-files/app-release-metadata.yaml
-          
-          # Commit and push both files
+          yq e -i '.app.last_failed_version = strenv(LATEST_VERSION)' app-release-metadata.yaml
+          yq e -i '.app.latest_version = strenv(LAST_SUCCESSFUL_VERSION)' app-release-metadata.yaml
+          yq e -i '.app.last_successful_version = strenv(PREV_SUCCESSFUL_VERSION)' app-release-metadata.yaml
           git config user.name "GitHub Actions"
           git config user.email "actions@github.com"
           git checkout ${{ github.ref_name }}
-          git add charts/app1/values.yaml metadata-files/app-release-metadata.yaml
+          git add charts/app1/values.yaml app-release-metadata.yaml
           git commit -m "Rollback app1 image tag to $LAST_SUCCESSFUL_TAG and update metadata after failed deployment of $LATEST_VERSION"
           git push origin ${{ github.ref_name }}
-
       - name: Sync ArgoCD Application for rollback
         run: |
           echo "Syncing ArgoCD application to apply rollback..."
-          # Trigger a manual sync by adding a refresh annotation
-          kubectl patch application ${{ env.APP_NAME }} -n argocd -p '{"metadata":{"annotations":{"argocd.argoproj.io/refresh":"'$(date +%s)'"}}}' --type=merge
-          
-          # Wait for sync to complete
+          kubectl patch application $APP_NAME -n argocd -p '{"metadata":{"annotations":{"argocd.argoproj.io/refresh":"'$(date +%s)'"}}}' --type=merge
           echo "Waiting for sync to complete..."
-          kubectl wait --for=condition=Synced application/${{ env.APP_NAME }} -n argocd --timeout=300s
-          
-          # Check application health
+          kubectl wait --for=condition=Synced application/$APP_NAME -n argocd --timeout=300s
           echo "Checking application health..."
-          kubectl wait --for=condition=Healthy application/${{ env.APP_NAME }} -n argocd --timeout=300s || echo "Application sync completed"
-
+          kubectl wait --for=condition=Healthy application/$APP_NAME -n argocd --timeout=300s || echo "Application sync completed"
       - name: Perform Argo Rollout rollback
         run: |
           echo "Performing Argo Rollout rollback..."
-          # Rollback the Argo Rollout to the previous stable version
           kubectl argo rollouts rollback ${{ steps.get_rollout_name.outputs.rollout_name }} -n $ENV || exit 1
-          
           echo "Waiting for rollback to complete..."
           kubectl argo rollouts status ${{ steps.get_rollout_name.outputs.rollout_name }} -n $ENV --watch || echo "Rollback completed"
-          
           echo "Rollback to $LAST_SUCCESSFUL_TAG completed successfully"
 
       # - name: Notify on Slack
