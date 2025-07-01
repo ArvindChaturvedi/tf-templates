@@ -1,31 +1,14 @@
- Sprint Retrospective Summary
-✅ What Went Well
-Item	Description
-Team Formation	New team members have started joining and contributing effectively. Momentum is building.
-App1 Deployment Pipeline	Strong progress made in setting up and advancing the deployment pipeline for app1.
-KT Sessions	Knowledge transfer sessions for new teams are going smoothly and enabling efficient onboarding.
-
-❌ What Didn’t Go Well
-Item	Description
-Access Provisioning Delays	Access provisioning continues to be a time-consuming task, delaying onboarding and productivity.
-AWS Account Structure Confusion	Lack of clarity around the different AWS accounts and their architectural roles is causing confusion.
-Infra Provisioning Dependencies	Provisioning components like IAM and Security Groups often faces unexpected dependencies and blockers.
-
-🔧 Actions & Improvements
-Action Item	Description
-Document AWS Architecture	Create detailed documentation or a walkthrough of AWS account structures and purpose.
-Accelerate Access Provisioning	Analyze the current access provisioning flow and automate or streamline wherever possible.
-Dependency Mapping for Infra	Build a quick-reference guide or checklist outlining prerequisites for IAM, SGs, etc.
-OpenSearch Query Guide	Prepare a short guide or hold a KT session on how to use OpenSearch for querying and analysis.
-
-Would you like me to export this to a PowerPoint (.pptx), Confluence wiki format, or PDF?
-
-
-
-
-
-
-
-
-
-Ask ChatGPT
+          kubectl -n argocd patch application "$APP_NAME" --type merge -p '
+          {
+            "spec": {
+              "operation": {
+                "sync": {
+                  "revision": "",
+                  "prune": true,
+                  "strategy": {
+                    "apply": {}
+                  }
+                }
+              }
+            }
+          }'
