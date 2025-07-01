@@ -140,6 +140,28 @@ jobs:
           kubectl argo rollouts set-weight ${{ steps.get_rollout_name.outputs.rollout_name }} 30 -n $ENV || exit 1
           echo "Waiting for rollout to stabilize at 30%..."
           kubectl argo rollouts status ${{ steps.get_rollout_name.outputs.rollout_name }} -n $ENV --timeout 60s || echo "Rollout stabilized at 30%"
+      - name: Wait for rollout to be paused
+        if: ${{ needs.detect-changes.outputs.app_image_changed == 'true' || needs.detect-changes.outputs.chart_version_changed == 'true' }}
+        run: |
+          ROLLOUT_NAME=${{ steps.get_rollout_name.outputs.rollout_name }}
+          NAMESPACE=$ENV
+          TIMEOUT=300
+          INTERVAL=10
+          elapsed=0
+          while true; do
+            PAUSED=$(kubectl argo rollouts get rollout $ROLLOUT_NAME -n $NAMESPACE -o jsonpath='{.status.pauseConditions}')
+            if [[ "$PAUSED" != "" && "$PAUSED" != "[]" ]]; then
+              echo "Rollout is paused."
+              break
+            fi
+            if [ $elapsed -ge $TIMEOUT ]; then
+              echo "Timed out waiting for rollout to be paused."
+              exit 1
+            fi
+            echo "Waiting for rollout to be paused..."
+            sleep $INTERVAL
+            elapsed=$((elapsed + INTERVAL))
+          done
       - name: Upload kubeconfig artifact
         uses: actions/upload-artifact@v4
         with:
@@ -197,6 +219,27 @@ jobs:
           kubectl argo rollouts set-weight $ROLLOUT_NAME 60 -n $ENV || exit 1
           echo "Waiting for rollout to stabilize..."
           kubectl argo rollouts status $ROLLOUT_NAME -n $ENV --watch || exit 1
+      - name: Wait for rollout to be paused
+        run: |
+          ROLLOUT_NAME=$ROLLOUT_NAME
+          NAMESPACE=$ENV
+          TIMEOUT=300
+          INTERVAL=10
+          elapsed=0
+          while true; do
+            PAUSED=$(kubectl argo rollouts get rollout $ROLLOUT_NAME -n $NAMESPACE -o jsonpath='{.status.pauseConditions}')
+            if [[ "$PAUSED" != "" && "$PAUSED" != "[]" ]]; then
+              echo "Rollout is paused."
+              break
+            fi
+            if [ $elapsed -ge $TIMEOUT ]; then
+              echo "Timed out waiting for rollout to be paused."
+              exit 1
+            fi
+            echo "Waiting for rollout to be paused..."
+            sleep $INTERVAL
+            elapsed=$((elapsed + INTERVAL))
+          done
 
   approve-100:
     needs: [deploy-60, detect-changes]
