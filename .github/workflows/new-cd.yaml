@@ -123,7 +123,7 @@ jobs:
           SYNC_STATUS=$(kubectl get application $APP_NAME -n argocd -o jsonpath='{.status.sync.status}')
           if [ "$SYNC_STATUS" != "Synced" ]; then
             echo "Application needs sync, triggering..."
-            kubectl patch application $APP_NAME -n argocd -p '{"metadata":{"annotations":{"argocd.argoproj.io/refresh":"'$(date +%s)'"}}}' --type=merge
+            kubectl -n argocd patch application $APP_NAME --type merge -p '{"spec": {"syncPolicy": {"automated": null}}, "status": {"operationState": null}}'
           else
             echo "Application is already synced"
           fi
