@@ -30,9 +30,23 @@ jobs:
       - name: Get new version tag
         id: new-tag
         run: |
-          branch=$(echo "${GITHUB_REF_NAME}")
-          ts=$(date +%Y%m%d%H%M%S)
-          echo "new_tag=${branch}-v${ts}" >> $GITHUB_OUTPUT
+          branch="${GITHUB_REF_NAME}"
+          # Find the latest tag for this branch matching the pattern
+          latest_tag=$(git tag --list "${branch}-*" | sort -V | tail -n1)
+          if [[ -z "$latest_tag" ]]; then
+            # If no tag exists, start with 1.0.0 (or your preferred starting version)
+            new_version="1.0.0"
+          else
+            # Extract the version part (after the branch-)
+            version="${latest_tag#${branch}-}"
+            # Split version into parts
+            IFS='.' read -r major minor patch <<< "$version"
+            # Increment patch
+            patch=$((patch + 1))
+            new_version="${major}.${minor}.${patch}"
+          fi
+          new_tag="${branch}-${new_version}"
+          echo "new_tag=$new_tag" >> $GITHUB_OUTPUT
 
       - name: Generate release notes
         id: changelog
