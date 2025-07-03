@@ -1,0 +1,140 @@
+name: Sync App Release Tag to Helm Chart Repo
+
+on:
+  push:
+    branches:
+      - develop
+      - qa
+      - production
+  workflow_dispatch:
+
+jobs:
+  create-release:
+    name: Auto Create Git Tag and Release Notes
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout source repo
+        uses: actions/checkout@v3
+        with:
+          fetch-depth: 0
+
+      - name: Get latest tag (if any)
+        id: get-latest-tag
+        run: |
+          latest_tag=$(git tag --sort=-creatordate | head -n1)
+          echo "latest_tag=$latest_tag" >> $GITHUB_OUTPUT
+
+      - name: Get new version tag
+        id: new-tag
+        run: |
+          branch=$(echo "${GITHUB_REF_NAME}")
+          ts=$(date +%Y%m%d%H%M%S)
+          echo "new_tag=${branch}-v${ts}" >> $GITHUB_OUTPUT
+
+      - name: Generate release notes
+        id: changelog
+        run: |
+          latest_tag="${{ steps.get-latest-tag.outputs.latest_tag }}"
+          if [ -z "$latest_tag" ]; then
+            echo "No previous tag found. Showing all commits."
+            git log --pretty=format:"* %s (%h)" > changes.txt
+          else
+            git log "$latest_tag"..HEAD --pretty=format:"* %s (%h)" > changes.txt
+          fi
+          echo "changelog<<EOF" >> $GITHUB_OUTPUT
+          cat changes.txt >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+
+      - name: Create new release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.new-tag.outputs.new_tag }}
+          name: Release ${{ steps.new-tag.outputs.new_tag }}
+          body: ${{ steps.changelog.outputs.changelog }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  sync-to-helm:
+    name: Sync Release Tag to Helm Chart Repo
+    needs: create-release
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout source repo
+        uses: actions/checkout@v3
+        with:
+          fetch-depth: 0
+
+      - name: Install GitHub CLI (gh)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gh
+
+      - name: Authenticate gh CLI
+        run: echo "${{ secrets.GITHUB_TOKEN }}" | gh auth login --with-token
+
+      - name: Get latest release tag
+        id: get-latest-release
+        run: |
+          tag=$(gh release view --json tagName --jq .tagName)
+          echo "tag=$tag" >> $GITHUB_OUTPUT
+
+      - name: Determine branch for release tag
+        id: get_branch
+        run: |
+          tag_commit=$(git rev-list -n 1 "${{ steps.get-latest-release.outputs.tag }}")
+          branch=$(git branch -r --contains "$tag_commit" | grep -E "origin/(develop|qa|production|feature_.+)" | head -n1 | sed 's|origin/||')
+
+          case "$branch" in
+            qa) helm_branch="qabranch" ;;
+            develop) helm_branch="develop" ;;
+            production) helm_branch="production" ;;
+            feature_*) helm_branch="$branch" ;;
+            *) echo "Unsupported branch: $branch"; exit 1 ;;
+          esac
+
+          echo "branch=$branch" >> $GITHUB_OUTPUT
+          echo "helm_branch=$helm_branch" >> $GITHUB_OUTPUT
+
+      - name: Checkout Helm chart repo
+        uses: actions/checkout@v3
+        with:
+          repository: your-org-or-user/helm-chart-repo
+          token: ${{ secrets.TARGET_REPO_PAT }}
+          ref: ${{ steps.get_branch.outputs.helm_branch }}
+          path: ../helm-repo
+
+      - name: Install yq
+        run: |
+          wget https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64 -O /usr/local/bin/yq
+          chmod +x /usr/local/bin/yq
+
+      - name: Update app-release-metadata.yaml
+        run: |
+          cd ../helm-repo
+          FILE="app-release-metadata.yaml"
+
+          if [ ! -f "$FILE" ]; then
+            echo "File $FILE not found" && exit 1
+          fi
+
+          current_latest=$(yq '.app.latest_version' $FILE | tr -d '"')
+
+          yq -i ".app.last_successful_version = \"$current_latest\"" $FILE
+          yq -i ".app.latest_version = \"${{ steps.get-latest-release.outputs.tag }}\"" $FILE
+
+          cat $FILE
+
+      - name: Commit and push updated metadata
+        run: |
+          cd ../helm-repo
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add app-release-metadata.yaml
+          git commit -m "Update metadata to ${{ steps.get-latest-release.outputs.tag }}" || echo "No changes to commit"
+          git push origin ${{ steps.get_branch.outputs.helm_branch }}
