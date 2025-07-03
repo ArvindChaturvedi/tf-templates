@@ -44,9 +44,11 @@ jobs:
           else
             git log "$latest_tag"..HEAD --pretty=format:"* %s (%h)" > changes.txt
           fi
-          echo "changelog<<EOF" >> $GITHUB_OUTPUT
-          cat changes.txt >> $GITHUB_OUTPUT
-          echo "EOF" >> $GITHUB_OUTPUT
+          changelog=$(cat changes.txt)
+          changelog="${changelog//'%'/'%25'}"
+          changelog="${changelog//$'\n'/'%0A'}"
+          changelog="${changelog//$'\r'/'%0D'}"
+          echo "changelog=$changelog" >> $GITHUB_OUTPUT
 
       - name: Create new release
         uses: softprops/action-gh-release@v2
