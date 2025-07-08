@@ -1,0 +1,270 @@
+name: Rollback Deployment
+
+on:
+  workflow_dispatch:
+    inputs:
+      APP_NAME:
+        description: 'Application name to rollback'
+        required: true
+        type: choice
+        options:
+          - app1
+          - app2
+      TARGET_IMAGE_TAG:
+        description: 'Target image tag to rollback to (will be populated from release-metadata.yaml)'
+        required: true
+        type: choice
+        options:
+          - "v1.0.0"
+          - "v1.0.1"
+          - "v1.1.0"
+          - "v1.1.1"
+          - "v1.2.0"
+      ENV:
+        description: 'Environment to rollback'
+        required: true
+        type: choice
+        options:
+          - feature
+          - staging
+          - prod
+      AWS_ACCESS_KEY_ID:
+        description: 'AWS Access Key ID'
+        required: true
+      AWS_SECRET_ACCESS_KEY:
+        description: 'AWS Secret Access Key'
+        required: true
+      AWS_SESSION_TOKEN:
+        description: 'AWS Session Token'
+        required: false
+      AWS_REGION:
+        description: 'AWS Region'
+        required: true
+        default: 'us-east-1'
+      ROLLBACK_REASON:
+        description: 'Reason for rollback (optional)'
+        required: false
+        default: 'Manual rollback initiated'
+
+jobs:
+  validate-rollback:
+    runs-on: ubuntu-latest
+    outputs:
+      current_tag: ${{ steps.validate.outputs.current_tag }}
+      target_tag: ${{ steps.validate.outputs.target_tag }}
+      app_exists: ${{ steps.validate.outputs.app_exists }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install yq
+        run: |
+          sudo wget https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64 -O /usr/bin/yq
+          sudo chmod +x /usr/bin/yq
+
+      - name: Validate rollback request
+        id: validate
+        run: |
+          APP_NAME="${{ github.event.inputs.APP_NAME }}"
+          TARGET_TAG="${{ github.event.inputs.TARGET_IMAGE_TAG }}"
+          
+          echo "Validating rollback request for $APP_NAME to tag $TARGET_TAG"
+          
+          # Check if app exists in metadata
+          APP_EXISTS=$(yq ".applications.$APP_NAME" release-metadata.yaml 2>/dev/null || echo "null")
+          if [[ "$APP_EXISTS" == "null" ]]; then
+            echo "Error: Application $APP_NAME not found in release-metadata.yaml"
+            exit 1
+          fi
+          
+          # Get current deployed tag
+          CURRENT_TAG=$(yq ".applications.$APP_NAME.current_deployed_tag" release-metadata.yaml)
+          if [[ "$CURRENT_TAG" == "null" || -z "$CURRENT_TAG" ]]; then
+            echo "Error: Current deployed tag not found for $APP_NAME"
+            exit 1
+          fi
+          
+          # Check if target tag exists in available tags
+          AVAILABLE_TAGS=$(yq ".applications.$APP_NAME.available_tags[]" release-metadata.yaml)
+          TAG_FOUND=false
+          for TAG in $AVAILABLE_TAGS; do
+            if [[ "$TAG" == "$TARGET_TAG" ]]; then
+              TAG_FOUND=true
+              break
+            fi
+          done
+          
+          if [[ "$TAG_FOUND" == "false" ]]; then
+            echo "Error: Target tag $TARGET_TAG not found in available tags for $APP_NAME"
+            echo "Available tags: $AVAILABLE_TAGS"
+            exit 1
+          fi
+          
+          # Check if target tag is different from current
+          if [[ "$CURRENT_TAG" == "$TARGET_TAG" ]]; then
+            echo "Warning: Target tag $TARGET_TAG is already deployed for $APP_NAME"
+            echo "This will trigger a redeployment of the same version"
+          fi
+          
+          echo "Validation successful:"
+          echo "  Current tag: $CURRENT_TAG"
+          echo "  Target tag: $TARGET_TAG"
+          
+          echo "current_tag=$CURRENT_TAG" >> $GITHUB_OUTPUT
+          echo "target_tag=$TARGET_TAG" >> $GITHUB_OUTPUT
+          echo "app_exists=true" >> $GITHUB_OUTPUT
+
+  rollback-deployment:
+    needs: validate-rollback
+    runs-on: ubuntu-latest
+    env:
+      APP_NAME: ${{ github.event.inputs.APP_NAME }}
+      TARGET_IMAGE_TAG: ${{ github.event.inputs.TARGET_IMAGE_TAG }}
+      ENV: ${{ github.event.inputs.ENV }}
+      AWS_ACCESS_KEY_ID: ${{ github.event.inputs.AWS_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ github.event.inputs.AWS_SECRET_ACCESS_KEY }}
+      AWS_SESSION_TOKEN: ${{ github.event.inputs.AWS_SESSION_TOKEN }}
+      AWS_REGION: ${{ github.event.inputs.AWS_REGION }}
+      ROLLBACK_REASON: ${{ github.event.inputs.ROLLBACK_REASON }}
+      CURRENT_TAG: ${{ needs.validate-rollback.outputs.current_tag }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.ref_name }}
+
+      - name: Set up AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ env.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ env.AWS_SECRET_ACCESS_KEY }}
+          aws-session-token: ${{ env.AWS_SESSION_TOKEN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Update kubeconfig for EKS cluster
+        run: aws eks update-kubeconfig --region $AWS_REGION --name $ENV-cluster
+
+      - name: Install yq and kubectl-argo-rollouts
+        run: |
+          sudo wget https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64 -O /usr/bin/yq
+          sudo chmod +x /usr/bin/yq
+          curl -sLO https://github.com/argoproj/argo-rollouts/releases/latest/download/kubectl-argo-rollouts-linux-amd64
+          chmod +x kubectl-argo-rollouts-linux-amd64
+          sudo mv kubectl-argo-rollouts-linux-amd64 /usr/local/bin/kubectl-argo-rollouts
+
+      - name: Get rollout name from cluster
+        id: get_rollout_name
+        run: |
+          ROLLOUT_NAME=$(kubectl get rollouts.argoproj.io -n $ENV -o jsonpath='{.items[0].metadata.name}')
+          echo "rollout_name=$ROLLOUT_NAME" >> $GITHUB_OUTPUT
+          echo "Found rollout: $ROLLOUT_NAME"
+
+      - name: Update Helm values.yaml with target image tag
+        run: |
+          echo "Updating Helm values.yaml for $APP_NAME to image tag $TARGET_IMAGE_TAG"
+          yq e -i '.app1.image.tag = "$TARGET_IMAGE_TAG"' charts/app1/values.yaml
+          echo "Updated charts/app1/values.yaml"
+
+      - name: Commit and push updated values
+        run: |
+          git config user.name "GitHub Actions"
+          git config user.email "actions@github.com"
+          git checkout ${{ github.ref_name }}
+          git add charts/app1/values.yaml
+          git commit -m "Rollback $APP_NAME to image tag $TARGET_IMAGE_TAG - Reason: $ROLLBACK_REASON"
+          git push origin ${{ github.ref_name }}
+          echo "Committed and pushed rollback changes"
+
+      - name: Sync ArgoCD Application
+        run: |
+          echo "Syncing ArgoCD application $APP_NAME..."
+          kubectl patch application $APP_NAME -n argocd -p '{"metadata":{"annotations":{"argocd.argoproj.io/refresh":"'$(date +%s)'"}}}' --type=merge
+          echo "Waiting for sync to complete..."
+          kubectl wait --for=condition=Synced application/$APP_NAME -n argocd --timeout=300s
+          echo "Checking application health..."
+          kubectl wait --for=condition=Healthy application/$APP_NAME -n argocd --timeout=300s || echo "Application sync completed"
+
+      - name: Perform immediate rollback using Argo Rollouts
+        run: |
+          echo "Performing immediate rollback for $APP_NAME to tag $TARGET_IMAGE_TAG"
+          ROLLOUT_NAME=${{ steps.get_rollout_name.outputs.rollout_name }}
+          
+          # Set the image directly on the rollout
+          kubectl argo rollouts set-image $ROLLOUT_NAME $APP_NAME=$TARGET_IMAGE_TAG -n $ENV
+          
+          # Promote the rollout to 100% immediately (no canary)
+          kubectl argo rollouts promote $ROLLOUT_NAME -n $ENV
+          
+          echo "Rollback initiated. Waiting for completion..."
+
+      - name: Wait for rollback completion
+        run: |
+          ROLLOUT_NAME=${{ steps.get_rollout_name.outputs.rollout_name }}
+          echo "Waiting for rollback to complete..."
+          kubectl argo rollouts status $ROLLOUT_NAME -n $ENV --watch --timeout 600s || echo "Rollback completed"
+
+      - name: Update release-metadata.yaml with new current tag
+        run: |
+          echo "Updating release-metadata.yaml with new current tag"
+          yq e -i ".applications.$APP_NAME.current_deployed_tag = \"$TARGET_IMAGE_TAG\"" release-metadata.yaml
+          yq e -i ".applications.$APP_NAME.last_updated = \"$(date -u +"%Y-%m-%dT%H:%M:%SZ")\"" release-metadata.yaml
+          
+          git add release-metadata.yaml
+          git commit -m "Update current deployed tag for $APP_NAME to $TARGET_IMAGE_TAG after rollback"
+          git push origin ${{ github.ref_name }}
+          echo "Updated release-metadata.yaml"
+
+      - name: Verify rollback success
+        run: |
+          ROLLOUT_NAME=${{ steps.get_rollout_name.outputs.rollout_name }}
+          echo "Verifying rollback success..."
+          
+          # Check rollout status
+          ROLLOUT_STATUS=$(kubectl argo rollouts get rollout $ROLLOUT_NAME -n $ENV -o jsonpath='{.status.phase}')
+          echo "Rollout status: $ROLLOUT_STATUS"
+          
+          if [[ "$ROLLOUT_STATUS" == "Healthy" || "$ROLLOUT_STATUS" == "Degraded" ]]; then
+            echo "Rollback verification completed"
+          else
+            echo "Warning: Rollout status is $ROLLOUT_STATUS"
+          fi
+
+      - name: Notify on Slack (Success)
+        if: success()
+        uses: slackapi/slack-github-action@v1.24.0
+        with:
+          payload: >
+            {
+              "text": ":white_check_mark: Rollback completed successfully!",
+              "blocks": [
+                {
+                  "type": "section",
+                  "text": {
+                    "type": "mrkdwn",
+                    "text": "*Rollback Completed Successfully* :white_check_mark:\n• *Application:* `${{ env.APP_NAME }}`\n• *Environment:* `${{ env.ENV }}`\n• *From:* `${{ env.CURRENT_TAG }}`\n• *To:* `${{ env.TARGET_IMAGE_TAG }}`\n• *Reason:* ${{ env.ROLLBACK_REASON }}\n• *Run ID:* `${{ github.run_id }}`"
+                  }
+                }
+              ]
+            }
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+
+      - name: Notify on Slack (Failure)
+        if: failure()
+        uses: slackapi/slack-github-action@v1.24.0
+        with:
+          payload: >
+            {
+              "text": ":x: Rollback failed!",
+              "blocks": [
+                {
+                  "type": "section",
+                  "text": {
+                    "type": "mrkdwn",
+                    "text": "*Rollback Failed* :x:\n• *Application:* `${{ env.APP_NAME }}`\n• *Environment:* `${{ env.ENV }}`\n• *Target Tag:* `${{ env.TARGET_IMAGE_TAG }}`\n• *Reason:* ${{ env.ROLLBACK_REASON }}\n• *Run ID:* `${{ github.run_id }}`\n• Check the workflow logs for details"
+                  }
+                }
+              ]
+            }
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }} 

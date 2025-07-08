@@ -1,0 +1,220 @@
+name: ECR Image Discovery
+
+on:
+  workflow_dispatch:
+    inputs:
+      APP_NAME:
+        description: 'Application name to discover images for (leave empty for all apps)'
+        required: false
+        default: ''
+      AWS_ACCESS_KEY_ID:
+        description: 'AWS Access Key ID'
+        required: true
+      AWS_SECRET_ACCESS_KEY:
+        description: 'AWS Secret Access Key'
+        required: true
+      AWS_SESSION_TOKEN:
+        description: 'AWS Session Token'
+        required: false
+      AWS_REGION:
+        description: 'AWS Region'
+        required: true
+        default: 'us-east-1'
+      ECR_REGISTRY:
+        description: 'ECR Registry URL'
+        required: true
+        default: '123456789012.dkr.ecr.us-east-1.amazonaws.com'
+  schedule:
+    # Run daily at 2 AM UTC to keep metadata updated
+    - cron: '0 2 * * *'
+
+jobs:
+  discover-ecr-images:
+    runs-on: ubuntu-latest
+    env:
+      AWS_ACCESS_KEY_ID: ${{ github.event.inputs.AWS_ACCESS_KEY_ID || secrets.AWS_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ github.event.inputs.AWS_SECRET_ACCESS_KEY || secrets.AWS_SECRET_ACCESS_KEY }}
+      AWS_SESSION_TOKEN: ${{ github.event.inputs.AWS_SESSION_TOKEN || secrets.AWS_SESSION_TOKEN }}
+      AWS_REGION: ${{ github.event.inputs.AWS_REGION || 'us-east-1' }}
+      ECR_REGISTRY: ${{ github.event.inputs.ECR_REGISTRY || '123456789012.dkr.ecr.us-east-1.amazonaws.com' }}
+      APP_NAME: ${{ github.event.inputs.APP_NAME }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set up AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ env.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ env.AWS_SECRET_ACCESS_KEY }}
+          aws-session-token: ${{ env.AWS_SESSION_TOKEN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Login to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Install yq
+        run: |
+          sudo wget https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64 -O /usr/bin/yq
+          sudo chmod +x /usr/bin/yq
+
+      - name: Install jq
+        run: sudo apt-get update && sudo apt-get install -y jq
+
+      - name: Discover ECR repositories and images
+        id: discover
+        run: |
+          # Define applications to discover (can be extended)
+          APPS=("app1" "app2")
+          
+          # Create temporary file for new metadata
+          TEMP_METADATA="/tmp/new-release-metadata.yaml"
+          
+          # Initialize the new metadata structure
+          cat > $TEMP_METADATA << EOF
+          # Release Metadata for ECR Image Tags
+          # This file is automatically updated by the ECR Image Discovery workflow
+          # Contains all available image tags for each application in ECR
+          
+          applications:
+          EOF
+          
+          # Process each application
+          for APP in "${APPS[@]}"; do
+            # Skip if specific app is requested and this doesn't match
+            if [[ -n "$APP_NAME" && "$APP" != "$APP_NAME" ]]; then
+              echo "Skipping $APP as specific app $APP_NAME was requested"
+              continue
+            fi
+            
+            echo "Discovering images for application: $APP"
+            
+            # Check if ECR repository exists
+            if aws ecr describe-repositories --repository-names $APP --region $AWS_REGION > /dev/null 2>&1; then
+              echo "Repository $APP exists, discovering images..."
+              
+              # Get all image tags for the repository
+              IMAGE_TAGS=$(aws ecr describe-images \
+                --repository-name $APP \
+                --region $AWS_REGION \
+                --query 'imageDetails[*].imageTags[]' \
+                --output text 2>/dev/null || echo "")
+              
+              if [[ -n "$IMAGE_TAGS" ]]; then
+                # Convert space-separated tags to YAML array format
+                YAML_TAGS=""
+                for TAG in $IMAGE_TAGS; do
+                  YAML_TAGS="$YAML_TAGS\n      - \"$TAG\""
+                done
+                
+                # Get current deployed tag from existing metadata (if available)
+                CURRENT_TAG=$(yq ".applications.$APP.current_deployed_tag" release-metadata.yaml 2>/dev/null || echo "")
+                if [[ "$CURRENT_TAG" == "null" || -z "$CURRENT_TAG" ]]; then
+                  # If no current tag, use the latest tag
+                  CURRENT_TAG=$(echo "$IMAGE_TAGS" | tr ' ' '\n' | sort -V | tail -n1)
+                fi
+                
+                # Add application to metadata
+                cat >> $TEMP_METADATA << EOF
+            $APP:
+              repository: $APP
+              available_tags:$YAML_TAGS
+              current_deployed_tag: "$CURRENT_TAG"
+              last_updated: "$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
+          EOF
+              else
+                echo "No image tags found for repository $APP"
+                # Add empty application entry
+                cat >> $TEMP_METADATA << EOF
+            $APP:
+              repository: $APP
+              available_tags: []
+              current_deployed_tag: ""
+              last_updated: "$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
+          EOF
+              fi
+            else
+              echo "Repository $APP does not exist in ECR"
+              # Add empty application entry
+              cat >> $TEMP_METADATA << EOF
+            $APP:
+              repository: $APP
+              available_tags: []
+              current_deployed_tag: ""
+              last_updated: "$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
+          EOF
+            fi
+          done
+          
+          # Add metadata section
+          cat >> $TEMP_METADATA << EOF
+          
+          # Metadata about the discovery process
+          metadata:
+            last_discovery_run: "$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
+            discovery_workflow_run_id: "${{ github.run_id }}"
+            total_applications: $(echo "${APPS[@]}" | wc -w)
+          EOF
+          
+          # Replace the existing file
+          cp $TEMP_METADATA release-metadata.yaml
+          
+          echo "Discovery completed. Updated release-metadata.yaml"
+
+      - name: Commit and push updated metadata
+        run: |
+          git config user.name "GitHub Actions"
+          git config user.email "actions@github.com"
+          
+          # Check if there are changes to commit
+          if git diff --quiet release-metadata.yaml; then
+            echo "No changes detected in release-metadata.yaml"
+          else
+            git add release-metadata.yaml
+            git commit -m "Update ECR image metadata - Run ID: ${{ github.run_id }}"
+            git push origin ${{ github.ref }}
+            echo "Successfully updated release-metadata.yaml"
+          fi
+
+      - name: Notify on Slack
+        if: success()
+        uses: slackapi/slack-github-action@v1.24.0
+        with:
+          payload: >
+            {
+              "text": ":white_check_mark: ECR Image Discovery completed successfully!",
+              "blocks": [
+                {
+                  "type": "section",
+                  "text": {
+                    "type": "mrkdwn",
+                    "text": "*ECR Image Discovery Completed* :white_check_mark:\n• Run ID: `${{ github.run_id }}`\n• Updated: `release-metadata.yaml`\n• Applications processed: `${{ env.APP_NAME || 'All' }}`"
+                  }
+                }
+              ]
+            }
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+
+      - name: Notify on Slack (Failure)
+        if: failure()
+        uses: slackapi/slack-github-action@v1.24.0
+        with:
+          payload: >
+            {
+              "text": ":x: ECR Image Discovery failed!",
+              "blocks": [
+                {
+                  "type": "section",
+                  "text": {
+                    "type": "mrkdwn",
+                    "text": "*ECR Image Discovery Failed* :x:\n• Run ID: `${{ github.run_id }}`\n• Check the workflow logs for details"
+                  }
+                }
+              ]
+            }
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }} 
