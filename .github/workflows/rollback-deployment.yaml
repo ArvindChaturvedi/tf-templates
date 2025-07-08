@@ -11,15 +11,9 @@ on:
           - app1
           - app2
       TARGET_IMAGE_TAG:
-        description: 'Target image tag to rollback to (from app1 ECR tags)'
+        description: 'Target image tag to rollback to'
         required: true
-        type: choice
-        options:
-          - "v1.0.0"
-          - "v1.0.1"
-          - "v1.1.0"
-          - "v1.1.1"
-          - "v1.2.0"
+        type: string
       ENV:
         description: 'Environment to rollback'
         required: true
@@ -47,66 +41,7 @@ on:
         default: 'Manual rollback initiated'
 
 jobs:
-  validate-rollback:
-    runs-on: ubuntu-latest
-    outputs:
-      current_tag: ${{ steps.validate.outputs.current_tag }}
-      target_tag: ${{ steps.validate.outputs.target_tag }}
-      app_exists: ${{ steps.validate.outputs.app_exists }}
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Install yq
-        run: |
-          sudo wget https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64 -O /usr/bin/yq
-          sudo chmod +x /usr/bin/yq
-
-      - name: Validate rollback request
-        id: validate
-        run: |
-          APP_NAME="${{ github.event.inputs.APP_NAME }}"
-          TARGET_TAG="${{ github.event.inputs.TARGET_IMAGE_TAG }}"
-          # Always use app1's tags for validation
-          echo "Validating rollback request for $APP_NAME to tag $TARGET_TAG (using app1 ECR tags)"
-          # Check if app exists in metadata (must be app1 or app2)
-          if [[ "$APP_NAME" != "app1" && "$APP_NAME" != "app2" ]]; then
-            echo "Error: Application $APP_NAME is not supported."
-            exit 1
-          fi
-          # Get current deployed tag for the selected app
-          CURRENT_TAG=$(yq ".applications.$APP_NAME.current_deployed_tag" release-metadata.yaml)
-          if [[ "$CURRENT_TAG" == "null" || -z "$CURRENT_TAG" ]]; then
-            echo "Error: Current deployed tag not found for $APP_NAME"
-            exit 1
-          fi
-          # Check if target tag exists in app1's available tags
-          AVAILABLE_TAGS=$(yq ".applications.app1.available_tags[]" release-metadata.yaml)
-          TAG_FOUND=false
-          for TAG in $AVAILABLE_TAGS; do
-            if [[ "$TAG" == "$TARGET_TAG" ]]; then
-              TAG_FOUND=true
-              break
-            fi
-          done
-          if [[ "$TAG_FOUND" == "false" ]]; then
-            echo "Error: Target tag $TARGET_TAG not found in available tags for app1"
-            echo "Available tags: $AVAILABLE_TAGS"
-            exit 1
-          fi
-          if [[ "$CURRENT_TAG" == "$TARGET_TAG" ]]; then
-            echo "Warning: Target tag $TARGET_TAG is already deployed for $APP_NAME"
-            echo "This will trigger a redeployment of the same version"
-          fi
-          echo "Validation successful:"
-          echo "  Current tag: $CURRENT_TAG"
-          echo "  Target tag: $TARGET_TAG"
-          echo "current_tag=$CURRENT_TAG" >> $GITHUB_OUTPUT
-          echo "target_tag=$TARGET_TAG" >> $GITHUB_OUTPUT
-          echo "app_exists=true" >> $GITHUB_OUTPUT
-
   rollback-deployment:
-    needs: validate-rollback
     runs-on: ubuntu-latest
     env:
       APP_NAME: ${{ github.event.inputs.APP_NAME }}
@@ -117,7 +52,6 @@ jobs:
       AWS_SESSION_TOKEN: ${{ github.event.inputs.AWS_SESSION_TOKEN }}
       AWS_REGION: ${{ github.event.inputs.AWS_REGION }}
       ROLLBACK_REASON: ${{ github.event.inputs.ROLLBACK_REASON }}
-      CURRENT_TAG: ${{ needs.validate-rollback.outputs.current_tag }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -154,10 +88,10 @@ jobs:
         run: |
           echo "Updating Helm values.yaml for $APP_NAME to image tag $TARGET_IMAGE_TAG"
           if [[ "$APP_NAME" == "app1" ]]; then
-            yq e -i '.app1.image.tag = "$TARGET_IMAGE_TAG"' charts/app1/values.yaml
+            yq e -i ".app1.image.tag = \"$TARGET_IMAGE_TAG\"" charts/app1/values.yaml
             echo "Updated charts/app1/values.yaml"
           elif [[ "$APP_NAME" == "app2" ]]; then
-            yq e -i '.app2.image.tag = "$TARGET_IMAGE_TAG"' charts/app2/values.yaml
+            yq e -i ".app2.image.tag = \"$TARGET_IMAGE_TAG\"" charts/app2/values.yaml
             echo "Updated charts/app2/values.yaml"
           fi
 
@@ -198,16 +132,6 @@ jobs:
           echo "Waiting for rollback to complete..."
           kubectl argo rollouts status $ROLLOUT_NAME -n $ENV --watch --timeout 600s || echo "Rollback completed"
 
-      - name: Update release-metadata.yaml with new current tag
-        run: |
-          echo "Updating release-metadata.yaml with new current tag"
-          yq e -i ".applications.$APP_NAME.current_deployed_tag = \"$TARGET_IMAGE_TAG\"" release-metadata.yaml
-          yq e -i ".applications.$APP_NAME.last_updated = \"$(date -u +"%Y-%m-%dT%H:%M:%SZ")\"" release-metadata.yaml
-          git add release-metadata.yaml
-          git commit -m "Update current deployed tag for $APP_NAME to $TARGET_IMAGE_TAG after rollback"
-          git push origin ${{ github.ref_name }}
-          echo "Updated release-metadata.yaml"
-
       - name: Verify rollback success
         run: |
           ROLLOUT_NAME=${{ steps.get_rollout_name.outputs.rollout_name }}
@@ -232,7 +156,7 @@ jobs:
                   "type": "section",
                   "text": {
                     "type": "mrkdwn",
-                    "text": "*Rollback Completed Successfully* :white_check_mark:\n• *Application:* `${{ env.APP_NAME }}`\n• *Environment:* `${{ env.ENV }}`\n• *From:* `${{ env.CURRENT_TAG }}`\n• *To:* `${{ env.TARGET_IMAGE_TAG }}`\n• *Reason:* ${{ env.ROLLBACK_REASON }}\n• *Run ID:* `${{ github.run_id }}`"
+                    "text": "*Rollback Completed Successfully* :white_check_mark:\n• *Application:* `${{ env.APP_NAME }}`\n• *Environment:* `${{ env.ENV }}`\n• *To:* `${{ env.TARGET_IMAGE_TAG }}`\n• *Reason:* ${{ env.ROLLBACK_REASON }}\n• *Run ID:* `${{ github.run_id }}`"
                   }
                 }
               ]
