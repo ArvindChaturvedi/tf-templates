@@ -11,7 +11,7 @@ on:
           - app1
           - app2
       TARGET_IMAGE_TAG:
-        description: 'Target image tag to rollback to (will be populated from release-metadata.yaml)'
+        description: 'Target image tag to rollback to (from app1 ECR tags)'
         required: true
         type: choice
         options:
@@ -67,25 +67,21 @@ jobs:
         run: |
           APP_NAME="${{ github.event.inputs.APP_NAME }}"
           TARGET_TAG="${{ github.event.inputs.TARGET_IMAGE_TAG }}"
-          
-          echo "Validating rollback request for $APP_NAME to tag $TARGET_TAG"
-          
-          # Check if app exists in metadata
-          APP_EXISTS=$(yq ".applications.$APP_NAME" release-metadata.yaml 2>/dev/null || echo "null")
-          if [[ "$APP_EXISTS" == "null" ]]; then
-            echo "Error: Application $APP_NAME not found in release-metadata.yaml"
+          # Always use app1's tags for validation
+          echo "Validating rollback request for $APP_NAME to tag $TARGET_TAG (using app1 ECR tags)"
+          # Check if app exists in metadata (must be app1 or app2)
+          if [[ "$APP_NAME" != "app1" && "$APP_NAME" != "app2" ]]; then
+            echo "Error: Application $APP_NAME is not supported."
             exit 1
           fi
-          
-          # Get current deployed tag
+          # Get current deployed tag for the selected app
           CURRENT_TAG=$(yq ".applications.$APP_NAME.current_deployed_tag" release-metadata.yaml)
           if [[ "$CURRENT_TAG" == "null" || -z "$CURRENT_TAG" ]]; then
             echo "Error: Current deployed tag not found for $APP_NAME"
             exit 1
           fi
-          
-          # Check if target tag exists in available tags
-          AVAILABLE_TAGS=$(yq ".applications.$APP_NAME.available_tags[]" release-metadata.yaml)
+          # Check if target tag exists in app1's available tags
+          AVAILABLE_TAGS=$(yq ".applications.app1.available_tags[]" release-metadata.yaml)
           TAG_FOUND=false
           for TAG in $AVAILABLE_TAGS; do
             if [[ "$TAG" == "$TARGET_TAG" ]]; then
@@ -93,23 +89,18 @@ jobs:
               break
             fi
           done
-          
           if [[ "$TAG_FOUND" == "false" ]]; then
-            echo "Error: Target tag $TARGET_TAG not found in available tags for $APP_NAME"
+            echo "Error: Target tag $TARGET_TAG not found in available tags for app1"
             echo "Available tags: $AVAILABLE_TAGS"
             exit 1
           fi
-          
-          # Check if target tag is different from current
           if [[ "$CURRENT_TAG" == "$TARGET_TAG" ]]; then
             echo "Warning: Target tag $TARGET_TAG is already deployed for $APP_NAME"
             echo "This will trigger a redeployment of the same version"
           fi
-          
           echo "Validation successful:"
           echo "  Current tag: $CURRENT_TAG"
           echo "  Target tag: $TARGET_TAG"
-          
           echo "current_tag=$CURRENT_TAG" >> $GITHUB_OUTPUT
           echo "target_tag=$TARGET_TAG" >> $GITHUB_OUTPUT
           echo "app_exists=true" >> $GITHUB_OUTPUT
@@ -162,15 +153,24 @@ jobs:
       - name: Update Helm values.yaml with target image tag
         run: |
           echo "Updating Helm values.yaml for $APP_NAME to image tag $TARGET_IMAGE_TAG"
-          yq e -i '.app1.image.tag = "$TARGET_IMAGE_TAG"' charts/app1/values.yaml
-          echo "Updated charts/app1/values.yaml"
+          if [[ "$APP_NAME" == "app1" ]]; then
+            yq e -i '.app1.image.tag = "$TARGET_IMAGE_TAG"' charts/app1/values.yaml
+            echo "Updated charts/app1/values.yaml"
+          elif [[ "$APP_NAME" == "app2" ]]; then
+            yq e -i '.app2.image.tag = "$TARGET_IMAGE_TAG"' charts/app2/values.yaml
+            echo "Updated charts/app2/values.yaml"
+          fi
 
       - name: Commit and push updated values
         run: |
           git config user.name "GitHub Actions"
           git config user.email "actions@github.com"
           git checkout ${{ github.ref_name }}
-          git add charts/app1/values.yaml
+          if [[ "$APP_NAME" == "app1" ]]; then
+            git add charts/app1/values.yaml
+          elif [[ "$APP_NAME" == "app2" ]]; then
+            git add charts/app2/values.yaml
+          fi
           git commit -m "Rollback $APP_NAME to image tag $TARGET_IMAGE_TAG - Reason: $ROLLBACK_REASON"
           git push origin ${{ github.ref_name }}
           echo "Committed and pushed rollback changes"
@@ -188,13 +188,8 @@ jobs:
         run: |
           echo "Performing immediate rollback for $APP_NAME to tag $TARGET_IMAGE_TAG"
           ROLLOUT_NAME=${{ steps.get_rollout_name.outputs.rollout_name }}
-          
-          # Set the image directly on the rollout
           kubectl argo rollouts set-image $ROLLOUT_NAME $APP_NAME=$TARGET_IMAGE_TAG -n $ENV
-          
-          # Promote the rollout to 100% immediately (no canary)
           kubectl argo rollouts promote $ROLLOUT_NAME -n $ENV
-          
           echo "Rollback initiated. Waiting for completion..."
 
       - name: Wait for rollback completion
@@ -208,7 +203,6 @@ jobs:
           echo "Updating release-metadata.yaml with new current tag"
           yq e -i ".applications.$APP_NAME.current_deployed_tag = \"$TARGET_IMAGE_TAG\"" release-metadata.yaml
           yq e -i ".applications.$APP_NAME.last_updated = \"$(date -u +"%Y-%m-%dT%H:%M:%SZ")\"" release-metadata.yaml
-          
           git add release-metadata.yaml
           git commit -m "Update current deployed tag for $APP_NAME to $TARGET_IMAGE_TAG after rollback"
           git push origin ${{ github.ref_name }}
@@ -218,11 +212,8 @@ jobs:
         run: |
           ROLLOUT_NAME=${{ steps.get_rollout_name.outputs.rollout_name }}
           echo "Verifying rollback success..."
-          
-          # Check rollout status
           ROLLOUT_STATUS=$(kubectl argo rollouts get rollout $ROLLOUT_NAME -n $ENV -o jsonpath='{.status.phase}')
           echo "Rollout status: $ROLLOUT_STATUS"
-          
           if [[ "$ROLLOUT_STATUS" == "Healthy" || "$ROLLOUT_STATUS" == "Degraded" ]]; then
             echo "Rollback verification completed"
           else
