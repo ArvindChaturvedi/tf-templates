@@ -110,7 +110,18 @@ jobs:
           git config user.name "GitHub Actions"
           git config user.email "actions@github.com"
           git checkout ${{ github.ref_name }}
-          git commit -am "Update app1 image tag to ${{ needs.detect-changes.outputs.latest_image_tag }} and/or chart version to ${{ needs.detect-changes.outputs.latest_chart_version }}"
+          COMMIT_MSG="Update $APP_NAME:"
+          if [ "${{ needs.detect-changes.outputs.app_image_changed }}" == "true" ]; then
+            COMMIT_MSG+=" image tag to ${{ needs.detect-changes.outputs.latest_image_tag }}"
+          fi
+          if [ "${{ needs.detect-changes.outputs.chart_version_changed }}" == "true" ]; then
+            if [ "${{ needs.detect-changes.outputs.app_image_changed }}" == "true" ]; then
+              COMMIT_MSG+=" and"
+            fi
+            COMMIT_MSG+=" chart version to ${{ needs.detect-changes.outputs.latest_chart_version }}"
+          fi
+          COMMIT_MSG+=" (Promoted to 30% traffic)"
+          git commit -am "$COMMIT_MSG"
           git push origin ${{ github.ref_name }}
       - name: Get rollout name from cluster
         id: get_rollout_name
@@ -219,6 +230,7 @@ jobs:
           kubectl argo rollouts set-weight $ROLLOUT_NAME 60 -n $ENV || exit 1
           echo "Waiting for rollout to stabilize..."
           kubectl argo rollouts status $ROLLOUT_NAME -n $ENV --watch || exit 1
+          echo "Promoted $APP_NAME to 60% traffic for version ${{ needs.detect-changes.outputs.latest_image_tag }} and/or chart version ${{ needs.detect-changes.outputs.latest_chart_version }}"
       - name: Wait for rollout to be paused
         run: |
           ROLLOUT_NAME=$ROLLOUT_NAME
@@ -294,6 +306,7 @@ jobs:
           kubectl argo rollouts set-weight $ROLLOUT_NAME 100 -n $ENV || exit 1
           echo "Waiting for rollout to stabilize..."
           kubectl argo rollouts status $ROLLOUT_NAME -n $ENV --watch || exit 1
+          echo "Promoted $APP_NAME to 100% traffic for version ${{ needs.detect-changes.outputs.latest_image_tag }} and/or chart version ${{ needs.detect-changes.outputs.latest_chart_version }}"
 
   rollback:
     if: ${{ needs.approve-60.outputs.approved == 'false' || needs.approve-100.outputs.approved == 'false' }}
@@ -346,7 +359,7 @@ jobs:
           git config user.email "actions@github.com"
           git checkout ${{ github.ref_name }}
           git add charts/app1/values.yaml app-release-metadata.yaml
-          git commit -m "Rollback app1 image tag to $LAST_SUCCESSFUL_TAG and update metadata after failed deployment of $LATEST_VERSION"
+          git commit -m "Rollback $APP_NAME image tag to $LAST_SUCCESSFUL_TAG and update metadata after failed deployment of $LATEST_VERSION"
           git push origin ${{ github.ref_name }}
       - name: Sync ArgoCD Application for rollback
         run: |
@@ -364,24 +377,24 @@ jobs:
           kubectl argo rollouts status ${{ steps.get_rollout_name.outputs.rollout_name }} -n $ENV --watch || echo "Rollback completed"
           echo "Rollback to $LAST_SUCCESSFUL_TAG completed successfully"
 
-      # - name: Notify on Slack
-      #   if: ${{ !cancelled() }}
-      #   uses: slackapi/slack-github-action@v1.24.0
-      #   with:
-      #     payload: >
-      #       {
-      #         "text": ":rocket: Feature rollout for *${{ env.APP_NAME }}* to *${{ env.ENV }}* complete! Promoted to 100% traffic after manual approval."
-      #       }
-      #   env:
-      #     SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+      - name: Notify on Slack
+        if: ${{ !cancelled() }}
+        uses: slackapi/slack-github-action@v1.24.0
+        with:
+          payload: >
+            {
+              "text": ":rocket: Rollout for *${{ env.APP_NAME }}* to *${{ env.ENV }}* complete! Promoted to *${{ needs.deploy-30.outputs.rollout_name }}* at *${{ needs.detect-changes.outputs.latest_image_tag }}* and/or chart version *${{ needs.detect-changes.outputs.latest_chart_version }}* at *${{ github.workflow }}* workflow."
+            }
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
 
-      # - name: Notify on Slack (Rollback)
-      #   if: ${{ cancelled() }}
-      #   uses: slackapi/slack-github-action@v1.24.0
-      #   with:
-      #     payload: >
-      #       {
-      #         "text": ":warning: Rollback triggered for *${{ env.APP_NAME }}* in *${{ env.ENV }}*. Deployment reverted to last successful version after manual rejection."
-      #       }
-      #   env:
-      #     SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+      - name: Notify on Slack (Rollback)
+        if: ${{ cancelled() }}
+        uses: slackapi/slack-github-action@v1.24.0
+        with:
+          payload: >
+            {
+              "text": ":warning: Rollback triggered for *${{ env.APP_NAME }}* in *${{ env.ENV }}*. Deployment reverted to last successful version *${{ needs.detect-changes.outputs.latest_image_tag }}* after manual rejection."
+            }
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
