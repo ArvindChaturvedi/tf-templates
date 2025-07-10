@@ -1,0 +1,28 @@
+# First, backup current ConfigMap
+kubectl get configmap argocd-rbac-cm -n argocd -o yaml > current-rbac-backup.yaml
+
+# Reset to default RBAC
+kubectl patch configmap argocd-rbac-cm -n argocd --type merge -p '{
+  "data": {
+    "policy.default": "role:readonly",
+    "policy.csv": "p, role:admin, applications, *, */*, allow\np, role:admin, clusters, *, *, allow\np, role:admin, repositories, *, *, allow\np, role:admin, certificates, *, *, allow\np, role:admin, accounts, *, *, allow\np, role:admin, gpgkeys, *, *, allow\np, role:admin, logs, *, *, allow\np, role:admin, exec, *, *, allow"
+  }
+}'
+
+
+
+
+# Backup and delete
+kubectl get configmap argocd-rbac-cm -n argocd -o yaml > rbac-backup.yaml
+kubectl delete configmap argocd-rbac-cm -n argocd
+
+# Restart ArgoCD
+kubectl rollout restart deployment argocd-server -n argocd
+kubectl rollout status deployment argocd-server -n argocd
+
+
+
+kubectl get configmap argocd-rbac-cm -n argocd -o yaml
+
+
+kubectl rollout restart deployment argocd-server -n argocdcommands.
