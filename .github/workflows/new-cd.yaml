@@ -99,17 +99,30 @@ jobs:
       - name: Patch values.yaml with latest image tag
         if: ${{ needs.detect-changes.outputs.app_image_changed == 'true' }}
         run: |
-          yq e -i '.app1.image.tag = "${{ needs.detect-changes.outputs.latest_image_tag }}"' charts/app1/values.yaml
+          if [ "$APP_NAME" = "app1" ]; then
+            yq e -i '.app1.image.tag = "${{ needs.detect-changes.outputs.latest_image_tag }}"' charts/app1/values.yaml
+          elif [ "$APP_NAME" = "app2" ]; then
+            yq e -i '.app2.image.tag = "${{ needs.detect-changes.outputs.latest_image_tag }}"' charts/app2/values.yaml
+          fi
       - name: Patch Chart.yaml with latest chart version
         if: ${{ needs.detect-changes.outputs.chart_version_changed == 'true' }}
         run: |
-          yq e -i '.version = "${{ needs.detect-changes.outputs.latest_chart_version }}"' charts/app1/Chart.yaml
+          if [ "$APP_NAME" = "app1" ]; then
+            yq e -i '.version = "${{ needs.detect-changes.outputs.latest_chart_version }}"' charts/app1/Chart.yaml
+          elif [ "$APP_NAME" = "app2" ]; then
+            yq e -i '.version = "${{ needs.detect-changes.outputs.latest_chart_version }}"' charts/app2/Chart.yaml
+          fi
       - name: Commit and push updated files
         if: ${{ needs.detect-changes.outputs.app_image_changed == 'true' || needs.detect-changes.outputs.chart_version_changed == 'true' }}
         run: |
           git config user.name "GitHub Actions"
           git config user.email "actions@github.com"
           git checkout ${{ github.ref_name }}
+          if [ "$APP_NAME" = "app1" ]; then
+            git add charts/app1/values.yaml charts/app1/Chart.yaml || true
+          elif [ "$APP_NAME" = "app2" ]; then
+            git add charts/app2/values.yaml charts/app2/Chart.yaml || true
+          fi
           COMMIT_MSG="Update $APP_NAME:"
           if [ "${{ needs.detect-changes.outputs.app_image_changed }}" == "true" ]; then
             COMMIT_MSG+=" image tag to ${{ needs.detect-changes.outputs.latest_image_tag }}"
@@ -309,7 +322,11 @@ jobs:
           echo "Promoted $APP_NAME to 100% traffic for version ${{ needs.detect-changes.outputs.latest_image_tag }} and/or chart version ${{ needs.detect-changes.outputs.latest_chart_version }}"
 
   rollback:
-    if: ${{ needs.approve-60.outputs.approved == 'false' || needs.approve-100.outputs.approved == 'false' }}
+    needs: [approve-60, approve-100]
+    if: |
+      failure() || cancelled() ||
+      (needs.approve-60.result == 'failure' || needs.approve-60.result == 'cancelled' || needs.approve-60.outputs.approved == 'false') ||
+      (needs.approve-100.result == 'failure' || needs.approve-100.result == 'cancelled' || needs.approve-100.outputs.approved == 'false')
     runs-on: ubuntu-latest
     env:
       APP_NAME: ${{ github.event.inputs.APP_NAME }}
@@ -351,14 +368,20 @@ jobs:
           export LATEST_VERSION=$(yq '.app.latest_version' app-release-metadata.yaml)
           export LAST_SUCCESSFUL_VERSION=$(yq '.app.last_successful_version' app-release-metadata.yaml)
           export PREV_SUCCESSFUL_VERSION=$(echo $LAST_SUCCESSFUL_VERSION | awk -F. '{patch=$3-1; print $1"."$2"."patch}' | sed 's/\"//g')
-          yq e -i '.app1.image.tag = strenv(LAST_SUCCESSFUL_TAG)' charts/app1/values.yaml
+          if [ "$APP_NAME" = "app1" ]; then
+            yq e -i '.app1.image.tag = strenv(LAST_SUCCESSFUL_TAG)' charts/app1/values.yaml
+            git add charts/app1/values.yaml
+          elif [ "$APP_NAME" = "app2" ]; then
+            yq e -i '.app2.image.tag = strenv(LAST_SUCCESSFUL_TAG)' charts/app2/values.yaml
+            git add charts/app2/values.yaml
+          fi
           yq e -i '.app.last_failed_version = strenv(LATEST_VERSION)' app-release-metadata.yaml
           yq e -i '.app.latest_version = strenv(LAST_SUCCESSFUL_VERSION)' app-release-metadata.yaml
           yq e -i '.app.last_successful_version = strenv(PREV_SUCCESSFUL_VERSION)' app-release-metadata.yaml
           git config user.name "GitHub Actions"
           git config user.email "actions@github.com"
           git checkout ${{ github.ref_name }}
-          git add charts/app1/values.yaml app-release-metadata.yaml
+          git add app-release-metadata.yaml
           git commit -m "Rollback $APP_NAME image tag to $LAST_SUCCESSFUL_TAG and update metadata after failed deployment of $LATEST_VERSION"
           git push origin ${{ github.ref_name }}
       - name: Sync ArgoCD Application for rollback
