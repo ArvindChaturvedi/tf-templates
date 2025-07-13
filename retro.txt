@@ -1,1 +1,0 @@
-kubectl -n argocd patch application <app-name> --type merge -p '{"spec":{"operation":{"sync":{"revision":"","prune":true,"strategy":{"apply":{}}}}}}'
