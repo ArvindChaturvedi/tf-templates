@@ -369,26 +369,26 @@ jobs:
           echo "rollout_name=$ROLLOUT_NAME" >> $GITHUB_OUTPUT
       - name: Rollback to last successful version
         run: |
-          echo "Rolling back to last successful version..."
-          export LAST_SUCCESSFUL_TAG=$(yq '.app.last_successful_version' app-release-metadata.yaml)
-          export LATEST_VERSION=$(yq '.app.latest_version' app-release-metadata.yaml)
-          export LAST_SUCCESSFUL_VERSION=$(yq '.app.last_successful_version' app-release-metadata.yaml)
-          export PREV_SUCCESSFUL_VERSION=$(echo $LAST_SUCCESSFUL_VERSION | awk -F. '{patch=$3-1; print $1"."$2"."patch}' | sed 's/\"//g')
-          if [ "$APP_NAME" = "app1" ]; then
-            yq e -i '.app1.image.tag = strenv(LAST_SUCCESSFUL_TAG)' charts/app1/values.yaml
-            git add charts/app1/values.yaml
-          elif [ "$APP_NAME" = "app2" ]; then
-            yq e -i '.app2.image.tag = strenv(LAST_SUCCESSFUL_TAG)' charts/app2/values.yaml
-            git add charts/app2/values.yaml
-          fi
-          yq e -i '.app.last_failed_version = strenv(LATEST_VERSION)' app-release-metadata.yaml
-          yq e -i '.app.latest_version = strenv(LAST_SUCCESSFUL_VERSION)' app-release-metadata.yaml
-          yq e -i '.app.last_successful_version = strenv(PREV_SUCCESSFUL_VERSION)' app-release-metadata.yaml
+          echo "Rolling back to last successful version for $APP_NAME..."
+
+          LATEST_VERSION=$(yq e ".app.${APP_NAME}.latest_version" app-release-metadata.yaml)
+          LAST_SUCCESSFUL_VERSION=$(yq e ".app.${APP_NAME}.last_successful_version" app-release-metadata.yaml)
+          PREV_SUCCESSFUL_VERSION=$(echo $LAST_SUCCESSFUL_VERSION | awk -F. '{patch=$3-1; print $1"."$2"."patch}' | sed 's/\"//g')
+
+          # Update the image tag in the correct values.yaml
+          yq e -i ".${APP_NAME}.image.tag = strenv(LAST_SUCCESSFUL_VERSION)" charts/${APP_NAME}/values.yaml
+          git add charts/${APP_NAME}/values.yaml
+
+          # Update only the relevant app's metadata
+          yq e -i ".app.${APP_NAME}.last_failed_version = strenv(LATEST_VERSION)" app-release-metadata.yaml
+          yq e -i ".app.${APP_NAME}.latest_version = strenv(LAST_SUCCESSFUL_VERSION)" app-release-metadata.yaml
+          yq e -i ".app.${APP_NAME}.last_successful_version = strenv(PREV_SUCCESSFUL_VERSION)" app-release-metadata.yaml
+
           git config user.name "GitHub Actions"
           git config user.email "actions@github.com"
           git checkout ${{ github.ref_name }}
           git add app-release-metadata.yaml
-          git commit -m "Rollback $APP_NAME image tag to $LAST_SUCCESSFUL_TAG and update metadata after failed deployment of $LATEST_VERSION"
+          git commit -m "Rollback $APP_NAME image tag to $LAST_SUCCESSFUL_VERSION and update metadata after failed deployment of $LATEST_VERSION"
           git push origin ${{ github.ref_name }}
       - name: Sync ArgoCD Application for rollback
         run: |
