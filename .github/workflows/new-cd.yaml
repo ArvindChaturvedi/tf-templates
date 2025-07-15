@@ -324,12 +324,14 @@ jobs:
   rollback:
     needs: [approve-60, approve-100, deploy-30, deploy-60, deploy-100]
     if: |
-      failure() || cancelled() ||
-      (needs.approve-60.result == 'failure' || needs.approve-60.result == 'cancelled' || needs.approve-60.outputs.approved == 'false') ||
-      (needs.approve-100.result == 'failure' || needs.approve-100.result == 'cancelled' || needs.approve-100.outputs.approved == 'false') ||
-      (needs.deploy-30.result == 'failure' || needs.deploy-30.result == 'cancelled') ||
-      (needs.deploy-60.result == 'failure' || needs.deploy-60.result == 'cancelled') ||
-      (needs.deploy-100.result == 'failure' || needs.deploy-100.result == 'cancelled')
+      always() &&
+      (
+        (needs.approve-60.result == 'failure' || needs.approve-60.result == 'cancelled' || needs.approve-60.outputs.approved == 'false') ||
+        (needs.approve-100.result == 'failure' || needs.approve-100.result == 'cancelled' || needs.approve-100.outputs.approved == 'false') ||
+        (needs.deploy-30.result == 'failure' || needs.deploy-30.result == 'cancelled') ||
+        (needs.deploy-60.result == 'failure' || needs.deploy-60.result == 'cancelled') ||
+        (needs.deploy-100.result == 'failure' || needs.deploy-100.result == 'cancelled')
+      )
     runs-on: ubuntu-latest
     # ... rest of your rollback job ...
     env:
