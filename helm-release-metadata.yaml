@@ -1,0 +1,9 @@
+app:
+  app1:
+    latest_version: "0.0.2"
+    last_successful_version: "0.0.1"
+    last_failed_version: ""
+  app2:
+    latest_version: "0.0.2"
+    last_successful_version: "0.0.1"
+    last_failed_version: ""

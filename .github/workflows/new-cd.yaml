@@ -48,10 +48,10 @@ jobs:
         run: |
           APP_IMAGE_CHANGED=false
           CHART_VERSION_CHANGED=false
-          LATEST_IMAGE_TAG=$(yq '.app.latest_version' app-release-metadata.yaml)
-          LAST_IMAGE_TAG=$(yq '.app.last_successful_version' app-release-metadata.yaml)
-          LATEST_CHART_VERSION=$(yq '.app.latest_version' helm-release-metadata.yaml)
-          LAST_CHART_VERSION=$(yq '.app.last_successful_version' helm-release-metadata.yaml)
+          LATEST_IMAGE_TAG=$(yq e ".app.${APP_NAME}.latest_version" app-release-metadata.yaml)
+          LAST_IMAGE_TAG=$(yq e ".app.${APP_NAME}.last_successful_version" app-release-metadata.yaml)
+          LATEST_CHART_VERSION=$(yq e ".app.${APP_NAME}.latest_version" helm-release-metadata.yaml)
+          LAST_CHART_VERSION=$(yq e ".app.${APP_NAME}.last_successful_version" helm-release-metadata.yaml)
           if [ "$LATEST_IMAGE_TAG" != "$LAST_IMAGE_TAG" ]; then
             APP_IMAGE_CHANGED=true
           fi
@@ -375,20 +375,30 @@ jobs:
           LAST_SUCCESSFUL_VERSION=$(yq e ".app.${APP_NAME}.last_successful_version" app-release-metadata.yaml)
           PREV_SUCCESSFUL_VERSION=$(echo $LAST_SUCCESSFUL_VERSION | awk -F. '{patch=$3-1; print $1"."$2"."patch}' | sed 's/\"//g')
 
+          LATEST_CHART_VERSION=$(yq e ".app.${APP_NAME}.latest_version" helm-release-metadata.yaml)
+          LAST_SUCCESSFUL_CHART_VERSION=$(yq e ".app.${APP_NAME}.last_successful_version" helm-release-metadata.yaml)
+          PREV_SUCCESSFUL_CHART_VERSION=$(echo $LAST_SUCCESSFUL_CHART_VERSION | awk -F. '{patch=$3-1; print $1"."$2"."patch}' | sed 's/\"//g')
+
           # Update the image tag in the correct values.yaml
           yq e -i ".${APP_NAME}.image.tag = strenv(LAST_SUCCESSFUL_VERSION)" charts/${APP_NAME}/values.yaml
           git add charts/${APP_NAME}/values.yaml
 
-          # Update only the relevant app's metadata
+          # Update only the relevant app's metadata in app-release-metadata.yaml
           yq e -i ".app.${APP_NAME}.last_failed_version = strenv(LATEST_VERSION)" app-release-metadata.yaml
           yq e -i ".app.${APP_NAME}.latest_version = strenv(LAST_SUCCESSFUL_VERSION)" app-release-metadata.yaml
           yq e -i ".app.${APP_NAME}.last_successful_version = strenv(PREV_SUCCESSFUL_VERSION)" app-release-metadata.yaml
+          git add app-release-metadata.yaml
+
+          # Update only the relevant app's metadata in helm-release-metadata.yaml
+          yq e -i ".app.${APP_NAME}.last_failed_version = strenv(LATEST_CHART_VERSION)" helm-release-metadata.yaml
+          yq e -i ".app.${APP_NAME}.latest_version = strenv(LAST_SUCCESSFUL_CHART_VERSION)" helm-release-metadata.yaml
+          yq e -i ".app.${APP_NAME}.last_successful_version = strenv(PREV_SUCCESSFUL_CHART_VERSION)" helm-release-metadata.yaml
+          git add helm-release-metadata.yaml
 
           git config user.name "GitHub Actions"
           git config user.email "actions@github.com"
           git checkout ${{ github.ref_name }}
-          git add app-release-metadata.yaml
-          git commit -m "Rollback $APP_NAME image tag to $LAST_SUCCESSFUL_VERSION and update metadata after failed deployment of $LATEST_VERSION"
+          git commit -m "Rollback $APP_NAME image tag to $LAST_SUCCESSFUL_VERSION and chart version to $LAST_SUCCESSFUL_CHART_VERSION and update metadata after failed deployment of $LATEST_VERSION/$LATEST_CHART_VERSION"
           git push origin ${{ github.ref_name }}
       - name: Sync ArgoCD Application for rollback
         run: |
