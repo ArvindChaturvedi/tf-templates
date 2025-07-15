@@ -70,15 +70,31 @@ jobs:
           echo "## 📋 Changes" >> release_notes.md
           echo "" >> release_notes.md
 
-          latest_tag=$(git tag --sort=-creatordate | head -n1)
-          if [ -z "$latest_tag" ]; then
-            echo "### Initial Release" >> release_notes.md
-            echo "" >> release_notes.md
-            git log --pretty=format:"- **%s** (%h) - %an" --no-merges >> release_notes.md
+          if [[ "$branch" == "production" ]]; then
+            # Find the previous production tag (v*), excluding the new one
+            new_tag="${{ inputs.release_tag }}"
+            prev_tag=$(git tag --sort=-creatordate | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | grep -v "^$new_tag$" | head -n1)
+            if [ -z "$prev_tag" ]; then
+              echo "### Initial Production Release" >> release_notes.md
+              echo "" >> release_notes.md
+              git log --pretty=format:"- **%s** (%h) - %an" --no-merges >> release_notes.md
+            else
+              echo "### Changes since ${prev_tag}" >> release_notes.md
+              echo "" >> release_notes.md
+              git log "$prev_tag"..HEAD --pretty=format:"- **%s** (%h) - %an" --no-merges >> release_notes.md
+            fi
           else
-            echo "### Changes since ${latest_tag}" >> release_notes.md
-            echo "" >> release_notes.md
-            git log "$latest_tag"..HEAD --pretty=format:"- **%s** (%h) - %an" --no-merges >> release_notes.md
+            # Non-production: use latest tag as before
+            latest_tag=$(git tag --sort=-creatordate | head -n1)
+            if [ -z "$latest_tag" ]; then
+              echo "### Initial Release" >> release_notes.md
+              echo "" >> release_notes.md
+              git log --pretty=format:"- **%s** (%h) - %an" --no-merges >> release_notes.md
+            else
+              echo "### Changes since ${latest_tag}" >> release_notes.md
+              echo "" >> release_notes.md
+              git log "$latest_tag"..HEAD --pretty=format:"- **%s** (%h) - %an" --no-merges >> release_notes.md
+            fi
           fi
 
           echo "" >> release_notes.md
