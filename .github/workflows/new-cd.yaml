@@ -379,9 +379,19 @@ jobs:
           LAST_SUCCESSFUL_CHART_VERSION=$(yq e ".app.${APP_NAME}.last_successful_version" helm-release-metadata.yaml)
           PREV_SUCCESSFUL_CHART_VERSION=$(echo $LAST_SUCCESSFUL_CHART_VERSION | awk -F. '{patch=$3-1; print $1"."$2"."patch}' | sed 's/\"//g')
 
+          # Set the correct values.yaml path based on app and AWS account
+          if [ "$APP_NAME" = "app1" ]; then
+            VALUES_PATH="charts/app1/values-${AWS_ACCOUNT_ID}.yaml"
+          elif [ "$APP_NAME" = "app2" ]; then
+            VALUES_PATH="charts/app2/values-${AWS_ACCOUNT_ID}.yaml"
+          else
+            echo "Unknown app: $APP_NAME"
+            exit 1
+          fi
+
           # Update the image tag in the correct values.yaml
-          yq e -i ".${APP_NAME}.image.tag = strenv(LAST_SUCCESSFUL_VERSION)" charts/${APP_NAME}/values.yaml
-          git add charts/${APP_NAME}/values.yaml
+          yq e -i ".${APP_NAME}.image.tag = strenv(LAST_SUCCESSFUL_VERSION)" "$VALUES_PATH"
+          git add "$VALUES_PATH"
 
           # Update only the relevant app's metadata in app-release-metadata.yaml
           yq e -i ".app.${APP_NAME}.last_failed_version = strenv(LATEST_VERSION)" app-release-metadata.yaml
