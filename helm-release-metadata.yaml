@@ -1,9 +1,9 @@
 app:
   app1:
-    latest_version: "0.0.2"
-    last_successful_version: "0.0.1"
-    last_failed_version: ""
+    latest_version: "1.2.2"
+    last_successful_version: "1.2.1"
+    last_failed_version: "1.2.3"
   app2:
-    latest_version: "0.0.2"
-    last_successful_version: "0.0.1"
+    latest_version: "1.2.3"
+    last_successful_version: "1.2.2"
     last_failed_version: ""

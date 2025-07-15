@@ -390,19 +390,19 @@ jobs:
           fi
 
           # Update the image tag in the correct values.yaml
-          yq e -i ".${APP_NAME}.image.tag = strenv(LAST_SUCCESSFUL_VERSION)" "$VALUES_PATH"
+          yq e -i ".${APP_NAME}.image.tag = \"$LAST_SUCCESSFUL_VERSION\"" "$VALUES_PATH"
           git add "$VALUES_PATH"
 
           # Update only the relevant app's metadata in app-release-metadata.yaml
-          yq e -i ".app.${APP_NAME}.last_failed_version = strenv(LATEST_VERSION)" app-release-metadata.yaml
-          yq e -i ".app.${APP_NAME}.latest_version = strenv(LAST_SUCCESSFUL_VERSION)" app-release-metadata.yaml
-          yq e -i ".app.${APP_NAME}.last_successful_version = strenv(PREV_SUCCESSFUL_VERSION)" app-release-metadata.yaml
+          yq e -i ".app.${APP_NAME}.last_failed_version = \"$LATEST_VERSION\"" app-release-metadata.yaml
+          yq e -i ".app.${APP_NAME}.latest_version = \"$LAST_SUCCESSFUL_VERSION\"" app-release-metadata.yaml
+          yq e -i ".app.${APP_NAME}.last_successful_version = \"$PREV_SUCCESSFUL_VERSION\"" app-release-metadata.yaml
           git add app-release-metadata.yaml
 
           # Update only the relevant app's metadata in helm-release-metadata.yaml
-          yq e -i ".app.${APP_NAME}.last_failed_version = strenv(LATEST_CHART_VERSION)" helm-release-metadata.yaml
-          yq e -i ".app.${APP_NAME}.latest_version = strenv(LAST_SUCCESSFUL_CHART_VERSION)" helm-release-metadata.yaml
-          yq e -i ".app.${APP_NAME}.last_successful_version = strenv(PREV_SUCCESSFUL_CHART_VERSION)" helm-release-metadata.yaml
+          yq e -i ".app.${APP_NAME}.last_failed_version = \"$LATEST_CHART_VERSION\"" helm-release-metadata.yaml
+          yq e -i ".app.${APP_NAME}.latest_version = \"$LAST_SUCCESSFUL_CHART_VERSION\"" helm-release-metadata.yaml
+          yq e -i ".app.${APP_NAME}.last_successful_version = \"$PREV_SUCCESSFUL_CHART_VERSION\"" helm-release-metadata.yaml
           git add helm-release-metadata.yaml
 
           git config user.name "GitHub Actions"
