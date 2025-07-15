@@ -1,0 +1,68 @@
+name: Production Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Release version (e.g., 1.2.3)'
+        required: true
+        type: string
+
+jobs:
+  call-release-notes:
+    uses: ./.github/workflows/new-ci.yaml
+    with:
+      version: ${{ github.event.inputs.version }}
+      release_tag: v${{ github.event.inputs.version }}
+
+  build-and-push-image:
+    runs-on: ubuntu-latest
+    needs: call-release-notes
+    env:
+      ECR_REPO: <your-ecr-repo>
+      AWS_REGION: <your-region>
+      IMAGE_TAG: v${{ github.event.inputs.version }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Login to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Build Docker image
+        run: |
+          docker build -t $ECR_REPO:$IMAGE_TAG .
+
+      - name: Push Docker image
+        run: |
+          docker push $ECR_REPO:$IMAGE_TAG
+
+  update-helm-metadata:
+    runs-on: ubuntu-latest
+    needs: build-and-push-image
+    steps:
+      - name: Checkout helm-k8s-chart repo
+        uses: actions/checkout@v3
+        with:
+          repository: <your-org>/helm-k8s-chart
+          token: ${{ secrets.GITHUB_TOKEN }}
+          path: helm-k8s-chart
+
+      - name: Update app-release-metadata.yaml
+        run: |
+          cd helm-k8s-chart
+          # Update the YAML file as per your structure, e.g.:
+          yq e '.app.version = "${{ github.event.inputs.version }}" | .app.tag = "v${{ github.event.inputs.version }}"' -i app-release-metadata.yaml
+          git config user.name "github-actions"
+          git config user.email "github-actions@github.com"
+          git add app-release-metadata.yaml
+          git commit -m "Update app release metadata for v${{ github.event.inputs.version }}" || echo "No changes to commit"
+          git push

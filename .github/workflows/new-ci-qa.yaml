@@ -1,0 +1,96 @@
+name: QA Release
+
+on:
+  workflow_dispatch:
+
+jobs:
+  fetch-latest-prod-tag:
+    runs-on: ubuntu-latest
+    outputs:
+      latest_tag: ${{ steps.get_tag.outputs.latest_tag }}
+      next_version: ${{ steps.bump.outputs.next_version }}
+    steps:
+      - name: Fetch latest production tag
+        id: get_tag
+        run: |
+          # Get latest tag matching v* (e.g., v1.2.3)
+          latest_tag=$(git ls-remote --tags origin | grep -o 'refs/tags/v[0-9]*\.[0-9]*\.[0-9]*$' | sed 's/refs\/tags\///' | sort -V | tail -n1)
+          echo "latest_tag=$latest_tag" >> $GITHUB_OUTPUT
+
+      - name: Bump patch version
+        id: bump
+        run: |
+          latest="${{ steps.get_tag.outputs.latest_tag }}"
+          # Remove 'v' and bump patch
+          version=$(echo $latest | sed 's/v//')
+          IFS='.' read -r major minor patch <<< "$version"
+          next_patch=$((patch + 1))
+          next_version="v${major}.${minor}.${next_patch}"
+          echo "next_version=$next_version" >> $GITHUB_OUTPUT
+
+  call-release-notes:
+    uses: ./.github/workflows/new-ci.yaml
+    with:
+      version: ${{ needs.fetch-latest-prod-tag.outputs.next_version }}
+      # No release_tag for QA, so notes will be minimal
+
+  build-and-push-image:
+    runs-on: ubuntu-latest
+    needs: [fetch-latest-prod-tag, call-release-notes]
+    env:
+      ECR_REPO: <your-ecr-repo>
+      AWS_REGION: <your-region>
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Get short SHA
+        id: sha
+        run: echo "sha=$(git rev-parse --short HEAD)" >> $GITHUB_OUTPUT
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Login to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Build Docker image
+        env:
+          QA_TAG: qa_${{ needs.fetch-latest-prod-tag.outputs.next_version }}_${{ steps.sha.outputs.sha }}
+        run: |
+          docker build -t $ECR_REPO:$QA_TAG .
+
+      - name: Push Docker image
+        env:
+          QA_TAG: qa_${{ needs.fetch-latest-prod-tag.outputs.next_version }}_${{ steps.sha.outputs.sha }}
+        run: |
+          docker push $ECR_REPO:$QA_TAG
+
+  update-helm-metadata:
+    runs-on: ubuntu-latest
+    needs: build-and-push-image
+    steps:
+      - name: Checkout helm-k8s-chart repo
+        uses: actions/checkout@v3
+        with:
+          repository: <your-org>/helm-k8s-chart
+          token: ${{ secrets.GITHUB_TOKEN }}
+          path: helm-k8s-chart
+
+      - name: Update app-release-metadata.yaml
+        env:
+          QA_TAG: qa_${{ needs.fetch-latest-prod-tag.outputs.next_version }}_${{ needs.build-and-push-image.outputs.sha }}
+        run: |
+          cd helm-k8s-chart
+          # Update the YAML file as per your structure, e.g.:
+          yq e '.app.version = "${{ needs.fetch-latest-prod-tag.outputs.next_version }}" | .app.tag = "$QA_TAG"' -i app-release-metadata.yaml
+          git config user.name "github-actions"
+          git config user.email "github-actions@github.com"
+          git add app-release-metadata.yaml
+          git commit -m "Update QA app release metadata for $QA_TAG" || echo "No changes to commit"
+          git push
