@@ -1,4 +1,4 @@
-name: Production Release: Tag & Notes
+name: Production Release - Tag & Notes
 
 on:
   workflow_dispatch:
