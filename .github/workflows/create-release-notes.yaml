@@ -80,3 +80,36 @@ jobs:
           body_path: release_notes.md
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Update GitHub Wiki with pipeline run details
+        run: |
+          set -e
+          git config --global user.name "github-actions"
+          git config --global user.email "github-actions@github.com"
+          git clone "https://x-access-token:${{ secrets.GH_WIKI_TOKEN }}@github.com/${{ github.repository }}.wiki.git" wiki
+          cd wiki
+
+          WIKI_PAGE="Release-History.md"
+          RUNNER="${{ github.actor }}"
+          RUN_DATE="$(date -u +"%Y-%m-%d %H:%M:%S UTC")"
+          VERSION="${{ steps.tag.outputs.version }}"
+          TAG="${{ steps.tag.outputs.tag }}"
+          BRANCH="${GITHUB_REF_NAME}"
+          RUN_URL="https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+
+          # Create page if not exists
+          if [ ! -f "$WIKI_PAGE" ]; then
+            echo "# Release History" > "$WIKI_PAGE"
+            echo "" >> "$WIKI_PAGE"
+            echo "| Date | User | Version | Tag | Branch | Workflow Run |" >> "$WIKI_PAGE"
+            echo "|------|------|---------|-----|--------|--------------|" >> "$WIKI_PAGE"
+          fi
+
+          # Append new entry
+          echo "| $RUN_DATE | $RUNNER | $VERSION | $TAG | $BRANCH | Run |" >> "$WIKI_PAGE"
+
+          git add "$WIKI_PAGE"
+          git commit -m "Update release history for $VERSION"
+          git push origin master
+        env:
+          GH_WIKI_TOKEN: ${{ secrets.GH_WIKI_TOKEN }}
