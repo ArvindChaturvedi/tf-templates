@@ -1,0 +1,1 @@
+perl -pe 's/^\[\s*(\d+\.\d+)\]/localtime(time - (`cut -d. -f1 /proc/uptime` - $1))/e' /var/log/dmesg.old
