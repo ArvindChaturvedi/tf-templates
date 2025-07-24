@@ -97,16 +97,20 @@ jobs:
           BRANCH="${GITHUB_REF_NAME}"
           RUN_URL="https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}"
 
+          # Prepare new entry
+          NEW_ENTRY="| $RUN_DATE | $RUNNER | $VERSION | $TAG | $BRANCH | [Run]($RUN_URL) |"
+
           # Create page if not exists
           if [ ! -f "$WIKI_PAGE" ]; then
-            echo "# Release History" > "$WIKI_PAGE"
-            echo "" >> "$WIKI_PAGE"
-            echo "| Date | User | Version | Tag | Branch | Workflow Run |" >> "$WIKI_PAGE"
-            echo "|------|------|---------|-----|--------|--------------|" >> "$WIKI_PAGE"
+        echo "# Release History" > "$WIKI_PAGE"
+        echo "" >> "$WIKI_PAGE"
+        echo "| Date | User | Version | Tag | Branch | Workflow Run |" >> "$WIKI_PAGE"
+        echo "|------|------|---------|-----|--------|--------------|" >> "$WIKI_PAGE"
+        echo "$NEW_ENTRY" >> "$WIKI_PAGE"
+          else
+        # Insert new entry after the header (line 4)
+        awk -v new_entry="$NEW_ENTRY" 'NR==1{print;next} NR==2{print;next} NR==3{print;next} NR==4{print; print new_entry; next} {print}' "$WIKI_PAGE" > tmp && mv tmp "$WIKI_PAGE"
           fi
-
-          # Append new entry
-          echo "| $RUN_DATE | $RUNNER | $VERSION | $TAG | $BRANCH | Run |" >> "$WIKI_PAGE"
 
           git add "$WIKI_PAGE"
           git commit -m "Update release history for $VERSION"
