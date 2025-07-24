@@ -96,16 +96,24 @@ jobs:
           TAG="${{ steps.tag.outputs.tag }}"
           BRANCH="${GITHUB_REF_NAME}"
           RUN_URL="https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          # Extract Jira ticket from version input if present, else leave blank
+          JIRA_TICKET=$(echo "$VERSION" | grep -oE '[A-Z]+-[0-9]+' || echo "")
+          # Status: green tick for success, red cross for failure
+          if [[ "${{ job.status }}" == "success" ]]; then
+        STATUS="✔️"
+          else
+        STATUS="❌"
+          fi
 
           # Prepare new entry
-          NEW_ENTRY="| $RUN_DATE | $RUNNER | $VERSION | $TAG | $BRANCH | [Run]($RUN_URL) |"
+          NEW_ENTRY="| $RUN_DATE | $RUNNER | $VERSION | $TAG | $BRANCH | $JIRA_TICKET | $STATUS | [Run]($RUN_URL) |"
 
           # Create page if not exists
           if [ ! -f "$WIKI_PAGE" ]; then
         echo "# Release History" > "$WIKI_PAGE"
         echo "" >> "$WIKI_PAGE"
-        echo "| Date | User | Version | Tag | Branch | Workflow Run |" >> "$WIKI_PAGE"
-        echo "|------|------|---------|-----|--------|--------------|" >> "$WIKI_PAGE"
+        echo "| Date | User | Version | Tag | Branch | Jira Ticket | Status | Workflow Run |" >> "$WIKI_PAGE"
+        echo "|------|------|---------|-----|--------|-------------|--------|--------------|" >> "$WIKI_PAGE"
         echo "$NEW_ENTRY" >> "$WIKI_PAGE"
           else
         # Insert new entry after the header (line 4)
