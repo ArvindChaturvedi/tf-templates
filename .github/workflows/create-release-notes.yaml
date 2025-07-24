@@ -100,7 +100,7 @@ jobs:
           JIRA_TICKET=$(echo "$VERSION" | grep -oE '[A-Z]+-[0-9]+' || echo "")
           # Status: green tick for success, red cross for failure
           if [[ "${{ job.status }}" == "success" ]]; then
-        STATUS="✔️"
+        STATUS="✅"
           else
         STATUS="❌"
           fi
