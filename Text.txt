@@ -1,0 +1,7 @@
+aws ec2 describe-instances --query "Reservations[].Instances[].[InstanceId,MaintenanceOptions.AutoRecovery]" --output table
+
+
+aws ec2 describe-instances --query "Reservations[].Instances[].{InstanceId:InstanceId,AutoRecovery:MaintenanceOptions.AutoRecovery}"
+
+
+aws ec2 describe-instances --query "Reservations[].Instances[].[InstanceId,MaintenanceOptions.AutoRecovery]" --output text
