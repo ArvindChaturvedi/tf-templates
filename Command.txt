@@ -1,0 +1,4 @@
+aws dynamodb delete-item \
+    --table-name terraform-state-lock \
+    --key '{"LockID": {"S": "your-bucket/path/terraform.tfstate"}}' \
+    --region us-east-1
