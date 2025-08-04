@@ -1,34 +1,27 @@
-FROM registry.access.redhat.com/ubi9/ubi
+FROM rockylinux:9
 
 ENV LANG=en_US.UTF-8
 ENV USERNAME=learner
 ENV USER_UID=1000
 ENV USER_GID=1000
 
-# Enable EPEL and CRB, then install Linux tools (adjust as needed if some fail)
-RUN dnf install -y 'dnf-command(config-manager)' \
-    && dnf config-manager --set-enabled crb \
-    && dnf install -y epel-release \
-    && dnf update -y \
-    && dnf install -y \
+RUN dnf install -y dnf-plugins-core \
+    && dnf install -y --allowerasing \
         sudo \
         curl \
         wget \
         git \
         vim \
         nano \
-        htop \
-        tree \
         file \
         unzip \
+        e2fsprogs \
         zip \
         tar \
         gzip \
         net-tools \
         iputils \
         nmap-ncat \
-        tcpdump \
-        telnet \
         openssh-clients \
         procps-ng \
         lsof \
@@ -54,19 +47,27 @@ RUN dnf install -y 'dnf-command(config-manager)' \
         bc \
         time \
         util-linux \
-        screen \
-        tmux \
         rsync \
     && dnf clean all \
     && rm -rf /var/cache/dnf
 
-# Create a learning user with sudo privileges
+RUN dnf install -y https://dl.fedoraproject.org/pub/epel/epel-release-latest-9.noarch.rpm \
+    && dnf update -y \
+    && dnf install -y --allowerasing \
+        htop \
+        tree \
+        tcpdump \
+        telnet \
+        screen \
+        tmux \
+    && dnf clean all \
+    && rm -rf /var/cache/dnf
+
 RUN groupadd --gid $USER_GID $USERNAME \
     && useradd --uid $USER_UID --gid $USER_GID -m $USERNAME \
     && echo "$USERNAME ALL=(root) NOPASSWD:ALL" > /etc/sudoers.d/$USERNAME \
     && chmod 0440 /etc/sudoers.d/$USERNAME
 
-# Set up aliases and a friendly prompt
 RUN echo 'export PS1="[\u@\h \w]\\$ "' >> /home/$USERNAME/.bashrc \
     && echo "alias ll='ls -alF'" >> /home/$USERNAME/.bashrc \
     && echo "alias la='ls -A'" >> /home/$USERNAME/.bashrc \
