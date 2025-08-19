@@ -8,3 +8,15 @@ for node in $(kubectl get nodes -o name | cut -d/ -f2); do
         (.node.fs.capacityBytes/1024/1024|tostring + "Mi")
       ] | @tsv'
 done | (echo -e "NODE\tCPU(m)\tMEM_USED(Mi)\tEPHEMERAL_USED(Mi)\tEPHEMERAL_CAPACITY(Mi)" && cat)
+
+#!/bin/bash
+echo "NODE                    CAPACITY(GB)  AVAILABLE(GB)  USED(GB)    USAGE%"
+echo "=================================================================="
+for node in $(kubectl get nodes -o jsonpath='{range .items[*]}{.metadata.name}{"\n"}{end}'); do
+  kubectl get --raw "/api/v1/nodes/$node/proxy/stats/summary" | \
+  jq -r --arg node "$node" '
+    .node.fs | 
+    "\($node | .[0:20])    \((.capacityBytes / 1024 / 1024 / 1024) | floor)GB         \((.availableBytes / 1024 / 1024 / 1024) | floor)GB        \((.usedBytes / 1024 / 1024 / 1024) | floor)GB      \(((.usedBytes / .capacityBytes) * 100) | floor)%"
+  '
+done
+
