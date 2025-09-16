@@ -1,4 +1,11 @@
-aws dynamodb delete-item \
-    --table-name terraform-state-lock \
-    --key '{"LockID": {"S": "your-bucket/path/terraform.tfstate"}}' \
-    --region us-east-1
+apiVersion: v1
+kind: Pod
+metadata:
+  name: aws-cli-pod
+  namespace: default
+spec:
+  serviceAccountName: my-sa
+  containers:
+    - name: aws-cli
+      image: amazon/aws-cli:2.15.46 # official AWS CLI v2 image
+      command: [ "sleep", "3600" ] # keep pod running for testing
