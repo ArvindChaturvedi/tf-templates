@@ -1,7 +1,64 @@
-aws ec2 describe-instances --query "Reservations[].Instances[].[InstanceId,MaintenanceOptions.AutoRecovery]" --output table
+name: Deploy with Release-based Tag
 
+on:
+  push:
+    branches:
+      - 'main'
+      - 'feature/*'
 
-aws ec2 describe-instances --query "Reservations[].Instances[].{InstanceId:InstanceId,AutoRecovery:MaintenanceOptions.AutoRecovery}"
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
 
+      - name: Get Latest Release
+        id: latest_release
+        uses: joutvhu/get-release@v1
+        with:
+          latest: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-aws ec2 describe-instances --query "Reservations[].Instances[].[InstanceId,MaintenanceOptions.AutoRecovery]" --output text
+      - name: Increment Release Tag
+        id: increment
+        run: |
+          value="${{ steps.latest_release.outputs.tag }}"
+          # assuming vX.Y.Z format; increment patch (Z)
+          NEW_TAG=$(echo "$value" | awk -F. -v OFS=. '{$NF++; print}')
+          echo "new_tag=$NEW_TAG" >> $GITHUB_OUTPUT
+
+      - name: Get Short SHA
+        id: sha
+        run: |
+          SHA_SHORT=$(echo "${GITHUB_SHA:0:7}")
+          echo "sha_short=$SHA_SHORT" >> $GITHUB_OUTPUT
+
+      - name: Build and Push Docker Image
+        run: |
+          IMAGE_TAG="${{ steps.increment.outputs.new_tag }}_${{ steps.sha.outputs.sha_short }}"
+          docker build -t $ECR_REPOSITORY/$IMAGE_NAME:$IMAGE_TAG .
+          docker push $ECR_REPOSITORY/$IMAGE_NAME:$IMAGE_TAG
+        env:
+          ECR_REPOSITORY: <your-ecr-repo>
+          IMAGE_NAME: <your-image-name>
+
+      - name: Install ArgoCD CLI
+        run: |
+          curl -sSL -o argocd https://${{ env.ARGOCD_SERVER }}/download/argocd-linux-amd64
+          chmod +x argocd
+          sudo mv argocd /usr/local/bin/
+
+      - name: Login to ArgoCD
+        run: |
+          argocd login $ARGOCD_SERVER --username ${{ secrets.ARGOCD_USERNAME }} --password ${{ secrets.ARGOCD_PASSWORD }} --insecure
+
+      - name: Set and Sync ArgoCD App
+        run: |
+          IMAGE_TAG="${{ steps.increment.outputs.new_tag }}_${{ steps.sha.outputs.sha_short }}"
+          argocd app set $ARGOCD_APP --helm-set image.tag=$IMAGE_TAG --server $ARGOCD_SERVER --insecure --auth-token $(argocd account generate-token)
+          argocd app sync $ARGOCD_APP --server $ARGOCD_SERVER --insecure --auth-token $(argocd account generate-token)
+        env:
+          ARGOCD_SERVER: <your-argocd-server>
+          ARGOCD_APP: <your-argocd-app>
