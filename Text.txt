@@ -1,17 +1,40 @@
-name: Deploy with Release-based Tag
+name: Manual Feature Branch Deploy to EKS ArgoCD
 
 on:
-  push:
-    branches:
-      - 'main'
-      - 'feature/*'
+  workflow_dispatch:
+    inputs:
+      feature_branch:
+        description: 'Feature branch to deploy'
+        required: true
+        default: 'main'
+        type: string
 
 jobs:
-  build-and-deploy:
+  deploy:
     runs-on: ubuntu-latest
+    env:
+      AWS_REGION: ap-south-1
+      ECR_REPOSITORY: <your-ecr-repo>
+      IMAGE_NAME: <your-image-name>
+      ARGOCD_APP: <your-argocd-app>
+      ARGOCD_SERVER: <your-argocd-server>
+      NAMESPACE: <your-namespace>
+
     steps:
-      - name: Checkout Code
+      - name: Checkout code from selected branch
         uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.feature_branch }}
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Log in to Amazon ECR
+        uses: aws-actions/amazon-ecr-login@v2
 
       - name: Get Latest Release
         id: latest_release
@@ -25,28 +48,31 @@ jobs:
         id: increment
         run: |
           value="${{ steps.latest_release.outputs.tag }}"
-          # assuming vX.Y.Z format; increment patch (Z)
+          # If your versioning is vX.Y.Z, increment patch (Z) only. Adjust script if you use a different pattern.
           NEW_TAG=$(echo "$value" | awk -F. -v OFS=. '{$NF++; print}')
           echo "new_tag=$NEW_TAG" >> $GITHUB_OUTPUT
 
       - name: Get Short SHA
         id: sha
         run: |
-          SHA_SHORT=$(echo "${GITHUB_SHA:0:7}")
-          echo "sha_short=$SHA_SHORT" >> $GITHUB_OUTPUT
+          SHORT_SHA=$(git rev-parse --short HEAD)
+          echo "sha_short=$SHORT_SHA" >> $GITHUB_OUTPUT
 
-      - name: Build and Push Docker Image
+      - name: Build and push Docker image
         run: |
           IMAGE_TAG="${{ steps.increment.outputs.new_tag }}_${{ steps.sha.outputs.sha_short }}"
           docker build -t $ECR_REPOSITORY/$IMAGE_NAME:$IMAGE_TAG .
           docker push $ECR_REPOSITORY/$IMAGE_NAME:$IMAGE_TAG
-        env:
-          ECR_REPOSITORY: <your-ecr-repo>
-          IMAGE_NAME: <your-image-name>
+
+      - name: Install kubectl
+        run: |
+          curl -LO "https://dl.k8s.io/release/$(curl -L -s https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl"
+          chmod +x kubectl
+          sudo mv kubectl /usr/local/bin/
 
       - name: Install ArgoCD CLI
         run: |
-          curl -sSL -o argocd https://${{ env.ARGOCD_SERVER }}/download/argocd-linux-amd64
+          curl -sSL -o argocd https://github.com/argoproj/argo-cd/releases/latest/download/argocd-linux-amd64
           chmod +x argocd
           sudo mv argocd /usr/local/bin/
 
@@ -54,11 +80,18 @@ jobs:
         run: |
           argocd login $ARGOCD_SERVER --username ${{ secrets.ARGOCD_USERNAME }} --password ${{ secrets.ARGOCD_PASSWORD }} --insecure
 
-      - name: Set and Sync ArgoCD App
+      - name: Set image tag and sync ArgoCD
         run: |
           IMAGE_TAG="${{ steps.increment.outputs.new_tag }}_${{ steps.sha.outputs.sha_short }}"
-          argocd app set $ARGOCD_APP --helm-set image.tag=$IMAGE_TAG --server $ARGOCD_SERVER --insecure --auth-token $(argocd account generate-token)
-          argocd app sync $ARGOCD_APP --server $ARGOCD_SERVER --insecure --auth-token $(argocd account generate-token)
-        env:
-          ARGOCD_SERVER: <your-argocd-server>
-          ARGOCD_APP: <your-argocd-app>
+          argocd app set $ARGOCD_APP \
+            --helm-set image.tag=$IMAGE_TAG \
+            --server $ARGOCD_SERVER --insecure \
+            --auth-token $(argocd account generate-token)
+          argocd app sync $ARGOCD_APP \
+            --server $ARGOCD_SERVER --insecure \
+            --auth-token $(argocd account generate-token)
+
+      # Optional: Wait for the rollout to complete
+      - name: Validate rollout status (optional)
+        run: |
+          kubectl argo rollouts get rollout <your-rollout-name> -n $NAMESPACE || echo "Validate manually if you use plain Deployments."
