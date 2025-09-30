@@ -1,0 +1,76 @@
+#!/bin/bash
+# Backup AWS WAF Classic (v1) WebACLs, Rules, and Conditions
+# Requirements: awscli, jq
+
+REGION="us-east-1"   # change if needed
+BACKUP_DIR="./waf-backup-$(date +%F-%H%M%S)"
+mkdir -p "$BACKUP_DIR"
+
+echo "🔹 Exporting AWS WAF Classic (v1) configs to $BACKUP_DIR"
+
+# 1. List all WebACLs
+WEB_ACLS=$(aws waf list-web-acls --region "$REGION" --output json)
+
+echo "$WEB_ACLS" | jq . > "$BACKUP_DIR/web-acls.json"
+
+# Loop through each WebACL
+for ACL_ID in $(echo "$WEB_ACLS" | jq -r '.WebACLs[].WebACLId'); do
+    ACL_NAME=$(echo "$WEB_ACLS" | jq -r ".WebACLs[] | select(.WebACLId==\"$ACL_ID\") | .Name")
+    echo "➡️ Backing up WebACL: $ACL_NAME ($ACL_ID)"
+
+    # Get full WebACL details
+    aws waf get-web-acl --web-acl-id "$ACL_ID" --region "$REGION" \
+        --output json > "$BACKUP_DIR/webacl-${ACL_NAME}-${ACL_ID}.json"
+
+    # Extract Rules from WebACL
+    RULE_IDS=$(jq -r '.WebACL.Rules[].RuleId' "$BACKUP_DIR/webacl-${ACL_NAME}-${ACL_ID}.json")
+    for RULE_ID in $RULE_IDS; do
+        RULE_DETAIL=$(aws waf get-rule --rule-id "$RULE_ID" --region "$REGION" --output json)
+        echo "$RULE_DETAIL" > "$BACKUP_DIR/rule-${RULE_ID}.json"
+
+        # Backup predicates inside each rule
+        for PREDICATE_ID in $(echo "$RULE_DETAIL" | jq -r '.Rule.Predicates[].DataId'); do
+            TYPE=$(echo "$RULE_DETAIL" | jq -r ".Rule.Predicates[] | select(.DataId==\"$PREDICATE_ID\") | .Type")
+
+            case $TYPE in
+                IPMatch)
+                    aws waf get-ip-set --ip-set-id "$PREDICATE_ID" --region "$REGION" \
+                        --output json > "$BACKUP_DIR/ipset-${PREDICATE_ID}.json"
+                    ;;
+                ByteMatch)
+                    aws waf get-byte-match-set --byte-match-set-id "$PREDICATE_ID" --region "$REGION" \
+                        --output json > "$BACKUP_DIR/bytematch-${PREDICATE_ID}.json"
+                    ;;
+                SqlInjectionMatch)
+                    aws waf get-sql-injection-match-set --sql-injection-match-set-id "$PREDICATE_ID" --region "$REGION" \
+                        --output json > "$BACKUP_DIR/sqli-${PREDICATE_ID}.json"
+                    ;;
+                XssMatch)
+                    aws waf get-xss-match-set --xss-match-set-id "$PREDICATE_ID" --region "$REGION" \
+                        --output json > "$BACKUP_DIR/xss-${PREDICATE_ID}.json"
+                    ;;
+                GeoMatch)
+                    aws waf get-geo-match-set --geo-match-set-id "$PREDICATE_ID" --region "$REGION" \
+                        --output json > "$BACKUP_DIR/geo-${PREDICATE_ID}.json"
+                    ;;
+                SizeConstraint)
+                    aws waf get-size-constraint-set --size-constraint-set-id "$PREDICATE_ID" --region "$REGION" \
+                        --output json > "$BACKUP_DIR/size-${PREDICATE_ID}.json"
+                    ;;
+                RegexMatch)
+                    aws waf get-regex-match-set --regex-match-set-id "$PREDICATE_ID" --region "$REGION" \
+                        --output json > "$BACKUP_DIR/regex-${PREDICATE_ID}.json"
+                    ;;
+                RegexPatternSet)
+                    aws waf get-regex-pattern-set --regex-pattern-set-id "$PREDICATE_ID" --region "$REGION" \
+                        --output json > "$BACKUP_DIR/regexpattern-${PREDICATE_ID}.json"
+                    ;;
+                *)
+                    echo "⚠️ Unknown Predicate Type: $TYPE"
+                    ;;
+            esac
+        done
+    done
+done
+
+echo "✅ Backup complete! Files saved in $BACKUP_DIR"
